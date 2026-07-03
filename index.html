@@ -53,6 +53,132 @@
   .tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }
   .tab-inactive:hover { color: #1e293b; }
   @media print { aside, .no-print, button { display: none !important; } main { padding: 0 !important; } }
+
+  /* ============================================
+     MOBILE-RESPONSIVE STYLES
+     ============================================ */
+  .mobile-header { display: none; }
+  .mobile-backdrop { display: none; }
+  .hamburger-btn { display: none; }
+
+  @media (max-width: 767px) {
+    /* Sidebar slides in from left, hidden by default */
+    aside {
+      position: fixed !important;
+      top: 0; left: 0; bottom: 0;
+      width: 260px !important;
+      z-index: 50;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease-out;
+      box-shadow: 2px 0 12px rgba(0,0,0,0.15);
+    }
+    aside.mobile-open { transform: translateX(0); }
+
+    /* Mobile top header bar */
+    .mobile-header {
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      background: white;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 10px 14px;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+    }
+    .hamburger-btn {
+      display: block !important;
+      background: none;
+      border: none;
+      padding: 6px;
+      cursor: pointer;
+    }
+    .hamburger-btn svg { width: 26px; height: 26px; }
+    aside .hamburger-btn { display: block !important; }
+
+    /* Backdrop when sidebar is open */
+    .mobile-backdrop {
+      display: block;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .mobile-backdrop.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Main content full width, adjust padding */
+    main {
+      width: 100% !important;
+      padding: 12px !important;
+    }
+
+    /* Tighter grid on mobile — stack cards */
+    .grid.grid-cols-2, .grid.grid-cols-3, .grid.grid-cols-4 {
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+    /* Except KPI dashboard cards — 2 per row on mobile */
+    .kpi-grid { grid-template-columns: 1fr 1fr !important; }
+
+    /* Tables scroll horizontally on mobile with visible cue */
+    .card > table,
+    .card table {
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+    }
+    table th, table td { padding: 8px 10px !important; font-size: 13px; }
+
+    /* Modals fit mobile screen */
+    .modal-backdrop > div {
+      max-width: 100% !important;
+      max-height: 90vh !important;
+      margin: 8px !important;
+      overflow-y: auto;
+    }
+
+    /* Buttons — bigger touch targets */
+    button, .btn-primary, .btn-secondary {
+      min-height: 44px;
+      font-size: 15px;
+    }
+    button.text-xs { min-height: 36px; font-size: 13px; }
+
+    /* Form inputs — bigger for finger input */
+    input, select, textarea {
+      font-size: 16px !important; /* prevents iOS zoom */
+      padding: 10px !important;
+    }
+
+    /* Login screen fits mobile */
+    #login-container .card {
+      margin: 12px;
+      padding: 24px 20px !important;
+    }
+
+    /* Page headings smaller on mobile */
+    h1.text-2xl { font-size: 1.35rem !important; }
+    h2.text-lg { font-size: 1.1rem !important; }
+
+    /* Hide desktop-only badges */
+    .desktop-only { display: none !important; }
+
+    /* Charts responsive */
+    canvas { max-width: 100% !important; height: auto !important; }
+  }
+
+  /* Tablet layout - between mobile and desktop */
+  @media (min-width: 768px) and (max-width: 1023px) {
+    aside { width: 200px !important; }
+    .grid.grid-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
+  }
 </style>
 </head>
 <body>
@@ -71,8 +197,11 @@
 
 <!-- MAIN APP -->
 <div id="app-container" class="hidden min-h-screen flex">
-  <aside class="w-64 bg-white border-r border-slate-200 flex flex-col">
-    <div class="p-6 border-b border-slate-200">
+  <!-- Mobile backdrop shown when sidebar is open -->
+  <div class="mobile-backdrop" onclick="toggleMobileSidebar(false)"></div>
+
+  <aside id="sidebar" class="w-64 bg-white border-r border-slate-200 flex flex-col">
+    <div class="p-6 border-b border-slate-200 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <div class="w-8 h-8 bg-blue-700 rounded-lg flex items-center justify-center text-white font-bold text-xs">G&amp;P</div>
         <div>
@@ -80,6 +209,9 @@
           <div class="text-xs text-slate-500">Loan Management</div>
         </div>
       </div>
+      <button onclick="toggleMobileSidebar(false)" class="hamburger-btn" aria-label="Close menu" style="display:none">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
     <nav id="nav-menu" class="flex-1 p-3 space-y-1 overflow-y-auto"></nav>
     <div class="p-4 border-t border-slate-200">
@@ -89,6 +221,17 @@
   </aside>
 
   <main class="flex-1 overflow-auto">
+    <!-- Mobile header bar with hamburger -->
+    <div class="mobile-header">
+      <button onclick="toggleMobileSidebar(true)" class="hamburger-btn" aria-label="Open menu">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 bg-blue-700 rounded-lg flex items-center justify-center text-white font-bold" style="font-size:10px">G&amp;P</div>
+        <div class="font-semibold text-slate-900 text-sm" id="mobile-view-title">G &amp; P Finance</div>
+      </div>
+      <div style="width:38px"></div>
+    </div>
     <div id="view-container" class="p-8"></div>
   </main>
 </div>
@@ -632,8 +775,33 @@ function render() {
   else if (v === 'audit') c.innerHTML = renderAudit();
   else if (v === 'data') c.innerHTML = renderDataManagement();
   else if (v === 'settings') c.innerHTML = renderSettings();
+  // Update mobile view title
+  const titleEl = document.getElementById('mobile-view-title');
+  if (titleEl) {
+    const titles = {
+      dashboard: 'Dashboard', loans: 'Loans', clients: 'Clients',
+      payments: 'Payments', reminders: 'Reminders', reports: 'Reports',
+      users: 'Users', audit: 'Audit Log', data: 'Backup & Export', settings: 'Settings'
+    };
+    titleEl.textContent = titles[v] || 'G & P Finance';
+  }
+  // Auto-close mobile sidebar after navigation
+  toggleMobileSidebar(false);
   // After DOM is ready, init any charts for dashboard
   if (v === 'dashboard') setTimeout(initDashboardCharts, 50);
+}
+
+function toggleMobileSidebar(open) {
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.querySelector('.mobile-backdrop');
+  if (!sidebar) return;
+  if (open) {
+    sidebar.classList.add('mobile-open');
+    if (backdrop) backdrop.classList.add('active');
+  } else {
+    sidebar.classList.remove('mobile-open');
+    if (backdrop) backdrop.classList.remove('active');
+  }
 }
 
 // =====================================================
@@ -664,7 +832,7 @@ function renderDashboard() {
       <p class="text-slate-500 text-sm mt-1">Overview of loan portfolio and collections</p>
     </div>
 
-    <div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-4 gap-4 mb-6 kpi-grid">
       <div class="card p-5"><div class="text-xs font-medium text-slate-500 uppercase">Active Loans</div><div class="text-3xl font-bold text-slate-900 mt-2">${activeLoans.length}</div><div class="text-xs text-slate-500 mt-1">${fmt(totalDisbursed)} disbursed</div></div>
       <div class="card p-5"><div class="text-xs font-medium text-slate-500 uppercase">Total Outstanding</div><div class="text-3xl font-bold text-blue-700 mt-2">${fmt(totalOutstanding)}</div><div class="text-xs text-slate-500 mt-1">Receivables</div></div>
       <div class="card p-5"><div class="text-xs font-medium text-slate-500 uppercase">Collections MTD</div><div class="text-3xl font-bold text-green-700 mt-2">${fmt(collectionsMTD)}</div><div class="text-xs text-slate-500 mt-1">${state.payments.filter(p => p.paymentDate.startsWith(thisMonth)).length} payments</div></div>
@@ -1032,7 +1200,7 @@ function openLoanDetail(loanId) {
           </div>
         </div>
         <div class="p-6">
-          <div class="grid grid-cols-4 gap-4 mb-6">
+          <div class="grid grid-cols-4 gap-4 mb-6 kpi-grid">
             <div><div class="text-xs text-slate-500 uppercase">Principal</div><div class="font-semibold mt-1">${fmt(loan.principal)}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Interest</div><div class="font-semibold mt-1">${loan.interestRate}%</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Term</div><div class="font-semibold mt-1">${loan.termMonths} months</div></div>
@@ -1810,7 +1978,7 @@ function buildClientStatement(clientId) {
         <div><div class="text-xs text-slate-500 uppercase">Phone</div><div class="font-medium mt-1">${escapeHtml(c.phone)}</div></div>
       </div>
 
-      <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-4 gap-4 mb-6 kpi-grid">
         <div class="bg-slate-50 rounded-lg p-3"><div class="text-xs text-slate-500 uppercase">Total Disbursed</div><div class="font-bold text-lg mt-1">${fmt(totalDisbursed)}</div></div>
         <div class="bg-slate-50 rounded-lg p-3"><div class="text-xs text-slate-500 uppercase">Total Repayable</div><div class="font-bold text-lg mt-1">${fmt(totalRepayable)}</div></div>
         <div class="bg-green-50 rounded-lg p-3"><div class="text-xs text-green-800 uppercase">Total Paid</div><div class="font-bold text-lg text-green-800 mt-1">${fmt(totalPaid)}</div></div>
