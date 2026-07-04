@@ -1043,11 +1043,12 @@ function openLoanForm(editId) {
           </div>` : ''}
           <div>
             <label>Client *</label>
-            <select id="f-clientId" required ${editing ? 'disabled' : ''}>
+            <select id="f-clientId" required ${editing ? 'disabled' : ''} onchange="showKycWarningForClient(this.value)">
               <option value="">Select client...</option>
               ${state.clients.map(c => `<option value="${c.id}" ${editing?.clientId===c.id?'selected':''}>${escapeHtml(c.fullName)} - ${escapeHtml(c.phone)}</option>`).join('')}
             </select>
             ${editing ? '<div class="text-xs text-slate-500 mt-1">Client cannot be changed on existing loans</div>' : ''}
+            <div id="kyc-warning-box" class="mt-2"></div>
           </div>
           <div class="grid grid-cols-3 gap-4">
             <div><label>Principal (N$) *</label><input type="number" id="f-principal" min="1" step="0.01" value="${editing?.principal || ''}" oninput="updateLoanCalc()" required></div>
@@ -1493,8 +1494,7 @@ function openClientDetail(clientId) {
             <div class="text-right"><div class="text-xs text-blue-900 font-medium uppercase">Active Loans</div><div class="text-2xl font-bold text-blue-900 mt-1">${loans.filter(l=>l.status==='Active').length}</div></div>
           </div>
 
-          <h3 class="font-semibold mb-3">KYC Documents</h3>
-          <div id="kyc-display-container" class="mb-6"><div class="text-sm text-slate-500 p-4 text-center bg-slate-50 rounded-lg">Loading documents...</div></div>
+          <div id="kyc-display-container" class="mb-6">${renderKycSection(c)}</div>
 
           <h3 class="font-semibold mb-3">Loan History</h3>
           ${loans.length === 0 ? '<div class="text-sm text-slate-500 p-4 text-center bg-slate-50 rounded-lg">No loans yet</div>' : `
@@ -1510,30 +1510,6 @@ function openClientDetail(clientId) {
     </div>
   `;
   document.getElementById('modal-container').innerHTML = modal;
-  // Async-load KYC documents
-  loadAllKyc(clientId).then(docs => {
-    const container = document.getElementById('kyc-display-container');
-    if (!container) return;
-    const items = [];
-    const labels = { photo: 'Client Photo', id: 'ID Document', income: 'Proof of Income' };
-    for (const t of ['photo', 'id', 'income']) {
-      if (docs[t]) {
-        const isImg = docs[t].mimeType && docs[t].mimeType.startsWith('image/');
-        const itemId = `kyc-item-${t}-${clientId}`;
-        items.push(`
-          <div class="border border-slate-200 rounded-lg p-3">
-            <div class="text-xs font-medium text-slate-700 mb-2">${labels[t]}</div>
-            ${isImg ? `<img src="${docs[t].data}" class="w-full h-32 object-cover rounded mb-2 cursor-pointer" onclick="viewKycFullscreen('${escapeHtml(docs[t].data)}', '${escapeHtml(docs[t].filename)}')">` : `<div class="w-full h-32 bg-slate-100 rounded mb-2 flex items-center justify-center"><svg class="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>`}
-            <div class="text-xs text-slate-500 truncate mb-2">${escapeHtml(docs[t].filename)}</div>
-            <button onclick="downloadDataUrl('${docs[t].data}', '${escapeHtml(docs[t].filename)}')" class="text-xs text-blue-700 hover:underline">Download</button>
-          </div>
-        `);
-      } else {
-        items.push(`<div class="border border-dashed border-slate-200 rounded-lg p-3 flex items-center justify-center text-xs text-slate-400 h-44">No ${labels[t]} on file</div>`);
-      }
-    }
-    container.innerHTML = `<div class="grid grid-cols-3 gap-3">${items.join('')}</div>`;
-  });
 }
 
 function viewKycFullscreen(dataUrl, filename) {
@@ -4172,11 +4148,11 @@ async function renderUploadPage(token) {
   `;
 
   const docs = [
-    { key: 'selfie', label: 'Selfie Photo', help: 'A clear photo of your face', accept: 'image/*', capture: 'user' },
-    { key: 'id_front', label: 'ID Card - Front', help: 'Clear photo of the front of your Namibian ID', accept: 'image/*', capture: 'environment' },
-    { key: 'id_back', label: 'ID Card - Back', help: 'Clear photo of the back of your Namibian ID', accept: 'image/*', capture: 'environment' },
-    { key: 'income_document', label: 'Latest Payslip', help: 'Photo or PDF of your most recent payslip', accept: 'image/*,application/pdf' },
-    { key: 'bank_statement', label: 'Bank Statement', help: 'Latest 3 months (photo or PDF)', accept: 'image/*,application/pdf' }
+    { key: 'selfie', label: 'Selfie Photo', help: 'A clear photo of your face', accept: 'image/*', capture: 'user', multiple: false },
+    { key: 'id_front', label: 'ID Card - Front', help: 'Clear photo of the front of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+    { key: 'id_back', label: 'ID Card - Back', help: 'Clear photo of the back of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+    { key: 'income_document', label: 'Latest Payslip', help: 'Photo or PDF of your most recent payslip (you can add multiple pages)', accept: 'image/*,application/pdf', multiple: true },
+    { key: 'bank_statement', label: 'Bank Statement', help: 'Latest 3 months (you can add multiple pages/photos)', accept: 'image/*,application/pdf', multiple: true }
   ];
   const formEl = document.getElementById('upload-form');
   formEl.innerHTML = docs.map(d => `
@@ -4184,7 +4160,7 @@ async function renderUploadPage(token) {
       <label class="block">
         <div class="font-medium text-slate-900">${d.label} <span class="text-red-600">*</span></div>
         <div class="text-xs text-slate-500 mt-1 mb-3">${d.help}</div>
-        <input type="file" id="doc-${d.key}" accept="${d.accept}" ${d.capture ? `capture="${d.capture}"` : ''} onchange="handlePublicFile(this, '${d.key}')" style="font-size:14px">
+        <input type="file" id="doc-${d.key}" accept="${d.accept}" ${d.capture ? `capture="${d.capture}"` : ''} ${d.multiple ? 'multiple' : ''} onchange="handlePublicFile(this, '${d.key}', ${d.multiple})" style="font-size:14px">
         <div id="preview-${d.key}" class="mt-3"></div>
       </label>
     </div>
@@ -4192,28 +4168,29 @@ async function renderUploadPage(token) {
   window._publicUploads = {};
 }
 
-function handlePublicFile(input, key) {
-  const file = input.files[0];
-  if (!file) return;
-  if (file.size > 5 * 1024 * 1024) {
-    alert('File too large. Maximum 5MB per file.');
-    input.value = '';
-    return;
+function handlePublicFile(input, key, multiple) {
+  const files = Array.from(input.files);
+  if (files.length === 0) return;
+  for (const f of files) {
+    if (f.size > 10 * 1024 * 1024) {
+      alert(`File ${f.name} is too large. Maximum 10MB per file.`);
+      input.value = '';
+      return;
+    }
   }
-  window._publicUploads[key] = file;
+  window._publicUploads[key] = files;
   const preview = document.getElementById(`preview-${key}`);
-  if (file.type.startsWith('image/')) {
+  if (files.length === 1 && files[0].type.startsWith('image/')) {
     const reader = new FileReader();
     reader.onload = e => {
       preview.innerHTML = `<img src="${e.target.result}" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid #e2e8f0;">`;
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(files[0]);
   } else {
-    preview.innerHTML = `<div class="text-sm text-green-700 bg-green-50 border border-green-200 p-2 rounded">✓ ${escapeHtml(file.name)} (${Math.round(file.size/1024)} KB)</div>`;
+    preview.innerHTML = `<div class="text-sm text-green-700 bg-green-50 border border-green-200 p-2 rounded">✓ ${files.length} file(s) selected: ${files.map(f => escapeHtml(f.name)).join(', ')}</div>`;
   }
-  // Enable submit if all files present
   const requiredKeys = ['selfie', 'id_front', 'id_back', 'income_document', 'bank_statement'];
-  const allPresent = requiredKeys.every(k => window._publicUploads[k]);
+  const allPresent = requiredKeys.every(k => window._publicUploads[k] && window._publicUploads[k].length > 0);
   document.getElementById('submit-uploads-btn').disabled = !allPresent;
 }
 
@@ -4223,16 +4200,31 @@ async function submitPublicUploads(token, clientId) {
   btn.textContent = 'Uploading...';
   const urlMap = { selfie: 'selfie_url', id_front: 'id_front_url', id_back: 'id_back_url', income_document: 'income_document_url', bank_statement: 'bank_statement_url' };
   const updates = {};
+  const pages = {};
+  const sources = {};
   try {
     for (const key of Object.keys(window._publicUploads)) {
-      const file = window._publicUploads[key];
-      const ext = file.name.split('.').pop().toLowerCase();
-      const path = `${clientId}/${key}_${Date.now()}.${ext}`;
-      const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
-      if (upErr) throw new Error(`Failed to upload ${key}: ${upErr.message}`);
-      const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
-      updates[urlMap[key]] = urlData.publicUrl;
+      const files = window._publicUploads[key];
+      const uploadedUrls = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ext = file.name.split('.').pop().toLowerCase();
+        const path = `${clientId}/${key}_${Date.now()}_${i}.${ext}`;
+        const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
+        if (upErr) throw new Error(`Failed to upload ${key}: ${upErr.message}`);
+        const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
+        uploadedUrls.push(urlData.publicUrl);
+      }
+      if (uploadedUrls.length > 0) {
+        updates[urlMap[key]] = uploadedUrls[0];
+        if (uploadedUrls.length > 1) pages[key] = uploadedUrls.slice(1);
+        sources[key] = 'client';
+      }
     }
+    updates.document_sources = sources;
+    updates.document_pages = pages;
+    updates.document_reviews = {};
+    updates.kyc_status = 'In Review';
     updates.documents_uploaded_at = new Date().toISOString();
     const { error: updErr } = await db.from('clients').update(updates).eq('id', clientId);
     if (updErr) throw new Error('Failed to save: ' + updErr.message);
@@ -4500,6 +4492,427 @@ function renderPublicError(container, title, message) {
       <p class="text-sm text-slate-600 mt-2">${escapeHtml(message)}</p>
     </div>
   `;
+}
+
+
+
+// =====================================================
+// SIGNED URLS - Secure document viewing
+// =====================================================
+async function getSignedUrl(publicUrl) {
+  // Extract storage path from public URL
+  const match = publicUrl.match(/\/storage\/v1\/object\/(?:public\/)?kyc-documents\/(.+)$/);
+  if (!match) return publicUrl;
+  const path = match[1];
+  const { data, error } = await db.storage.from('kyc-documents').createSignedUrl(path, 3600);
+  if (error) { console.error('Signed URL error:', error); return publicUrl; }
+  return data.signedUrl;
+}
+
+async function viewDocument(publicUrl, filename) {
+  if (!publicUrl) { showAlert('No document available'); return; }
+  showAlert('Opening document...', 'Please wait');
+  const signedUrl = await getSignedUrl(publicUrl);
+  closeConfirm();
+  window.open(signedUrl, '_blank');
+}
+
+async function downloadDocument(publicUrl, filename) {
+  if (!publicUrl) return;
+  const signedUrl = await getSignedUrl(publicUrl);
+  const a = document.createElement('a');
+  a.href = signedUrl;
+  a.download = filename || 'document';
+  a.target = '_blank';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// =====================================================
+// KYC DOCUMENT DISPLAY & REVIEW UI
+// =====================================================
+const KYC_DOC_TYPES = [
+  { key: 'selfie', urlField: 'selfieUrl', label: 'Selfie', icon: '📷', multiPage: false },
+  { key: 'id_front', urlField: 'idFrontUrl', label: 'ID - Front', icon: '🪪', multiPage: false },
+  { key: 'id_back', urlField: 'idBackUrl', label: 'ID - Back', icon: '🪪', multiPage: false },
+  { key: 'income_document', urlField: 'incomeDocumentUrl', label: 'Payslip', icon: '💵', multiPage: true },
+  { key: 'bank_statement', urlField: 'bankStatementUrl', label: 'Bank Statement', icon: '🏦', multiPage: true }
+];
+
+function docStatus(client, docKey) {
+  const reviews = client.documentReviews || {};
+  return reviews[docKey]?.status || 'pending';
+}
+
+function docPages(client, docKey) {
+  const pages = client.documentPages || {};
+  return pages[docKey] || [];
+}
+
+function computeKycStatus(client) {
+  const reviews = client.documentReviews || {};
+  const statuses = KYC_DOC_TYPES.map(d => reviews[d.key]?.status || 'missing');
+  const primaryUrls = KYC_DOC_TYPES.map(d => client[d.urlField]).filter(u => u);
+  if (primaryUrls.length === 0) return 'Not Started';
+  if (statuses.some(s => s === 'rejected')) return 'Requires Correction';
+  if (statuses.every(s => s === 'approved')) return 'Approved';
+  if (primaryUrls.length < KYC_DOC_TYPES.length) return 'Pending';
+  return 'In Review';
+}
+
+function renderKycSection(client) {
+  const status = client.kycStatus || computeKycStatus(client);
+  const statusColors = {
+    'Not Started': 'bg-slate-100 text-slate-700',
+    'Pending': 'bg-yellow-100 text-yellow-800',
+    'In Review': 'bg-blue-100 text-blue-800',
+    'Approved': 'bg-green-100 text-green-800',
+    'Requires Correction': 'bg-red-100 text-red-800'
+  };
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-semibold">KYC Documents</h3>
+      <div class="flex items-center gap-2">
+        <span class="text-xs px-2 py-1 rounded-full ${statusColors[status]}">${status}</span>
+        <button onclick="openAdminUploadModal('${client.id}')" class="text-xs text-blue-700 hover:underline">+ Upload for Client</button>
+      </div>
+    </div>
+    <div class="space-y-2 mb-6">
+      ${KYC_DOC_TYPES.map(d => renderKycDocRow(client, d)).join('')}
+    </div>
+  `;
+}
+
+function renderKycDocRow(client, docType) {
+  const url = client[docType.urlField];
+  const pages = docPages(client, docType.key);
+  const totalPages = (url ? 1 : 0) + pages.length;
+  const review = (client.documentReviews || {})[docType.key];
+  const status = review?.status || (url ? 'pending' : 'missing');
+  const source = (client.documentSources || {})[docType.key];
+  const sourceLabel = source === 'client' ? '(uploaded by client)' : source ? '(uploaded by staff)' : '';
+
+  const statusBadge = {
+    'missing': '<span class="text-xs text-slate-500">Not uploaded</span>',
+    'pending': '<span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">Awaiting review</span>',
+    'approved': '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">✓ Approved</span>',
+    'rejected': `<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">✗ Rejected${review?.reason ? ': ' + escapeHtml(review.reason) : ''}</span>`
+  }[status];
+
+  const actions = url ? `
+    <div class="flex gap-2 mt-2 flex-wrap">
+      <button onclick="viewDocument('${url}', '${docType.key}')" class="text-xs bg-slate-700 hover:bg-slate-800 text-white px-2 py-1 rounded">View</button>
+      <button onclick="downloadDocument('${url}', '${docType.key}.pdf')" class="text-xs bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded">Download</button>
+      ${status === 'pending' ? `
+        <button onclick="approveDocument('${client.id}', '${docType.key}')" class="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded">Approve</button>
+        <button onclick="rejectDocument('${client.id}', '${docType.key}')" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded">Reject</button>
+      ` : ''}
+      ${status === 'approved' || status === 'rejected' ? `
+        <button onclick="resetDocumentReview('${client.id}', '${docType.key}')" class="text-xs text-slate-500 hover:underline">Reset review</button>
+      ` : ''}
+    </div>
+  ` : '';
+
+  const multiPageList = pages.length > 0 ? `
+    <div class="text-xs text-slate-600 mt-1">
+      Additional pages: ${pages.map((p, i) => `<button onclick="viewDocument('${p}', '${docType.key}_p${i+2}')" class="text-blue-700 hover:underline mr-2">Page ${i+2}</button>`).join('')}
+    </div>
+  ` : '';
+
+  return `
+    <div class="border border-slate-200 rounded-lg p-3 bg-white">
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="font-medium text-sm">${docType.icon} ${docType.label}${totalPages > 1 ? ` (${totalPages} pages)` : ''}</div>
+          <div class="text-xs text-slate-500 mt-0.5">${sourceLabel}</div>
+        </div>
+        ${statusBadge}
+      </div>
+      ${multiPageList}
+      ${actions}
+    </div>
+  `;
+}
+
+// =====================================================
+// APPROVAL / REJECTION LOGIC
+// =====================================================
+async function approveDocument(clientId, docKey) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const reviews = { ...(client.documentReviews || {}) };
+  reviews[docKey] = {
+    status: 'approved',
+    reviewedBy: state.currentUser?.id,
+    reviewedByName: state.currentUser?.fullName,
+    reviewedAt: new Date().toISOString(),
+    reason: null
+  };
+  const updates = { document_reviews: reviews };
+  // Recompute overall status
+  const tempClient = { ...client, documentReviews: reviews };
+  updates.kyc_status = computeKycStatus(tempClient);
+  const { error } = await db.from('clients').update(updates).eq('id', clientId);
+  if (error) { showAlert('Approval failed: ' + error.message); return; }
+  await logAudit('approve', 'kyc_document', clientId, { docKey });
+  await saveTable('clients');
+  closeModal();
+  openClientDetail(clientId);
+}
+
+function rejectDocument(clientId, docKey) {
+  const docTypeLabel = KYC_DOC_TYPES.find(d => d.key === docKey)?.label || docKey;
+  const modal = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-[60] p-4" onclick="if(event.target===this) closeSubModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div class="px-6 py-4 border-b border-slate-200"><h2 class="font-semibold text-lg">Reject: ${escapeHtml(docTypeLabel)}</h2></div>
+        <div class="p-6 space-y-4">
+          <div>
+            <label class="text-sm font-medium">Reason for rejection *</label>
+            <select id="rej-reason" onchange="document.getElementById('rej-custom').style.display = this.value==='Other' ? 'block' : 'none';" class="mt-2">
+              <option value="">Select a reason...</option>
+              <option value="Photo too blurry or unclear">Photo too blurry or unclear</option>
+              <option value="Document not fully visible">Document not fully visible</option>
+              <option value="Wrong document uploaded">Wrong document uploaded</option>
+              <option value="Document appears expired">Document appears expired</option>
+              <option value="Document does not match client details">Document does not match client details</option>
+              <option value="Poor lighting or shadows on document">Poor lighting or shadows on document</option>
+              <option value="Bank statement not recent (older than 3 months)">Bank statement not recent</option>
+              <option value="Payslip not recent">Payslip not recent</option>
+              <option value="Other">Other (specify below)</option>
+            </select>
+            <input type="text" id="rej-custom" placeholder="Enter custom reason..." style="display:none; margin-top:8px;">
+          </div>
+          <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900">
+            After rejection, a re-upload link with the reason will be generated for you to send to the client via WhatsApp.
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="closeSubModal()" class="btn-secondary">Cancel</button>
+          <button onclick="confirmRejectDocument('${clientId}', '${docKey}')" class="text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-medium">Reject Document</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-container').insertAdjacentHTML('beforeend', `<div id="sub-modal">${modal}</div>`);
+}
+
+function closeSubModal() {
+  const sub = document.getElementById('sub-modal');
+  if (sub) sub.remove();
+}
+
+async function confirmRejectDocument(clientId, docKey) {
+  const selectEl = document.getElementById('rej-reason');
+  const customEl = document.getElementById('rej-custom');
+  let reason = selectEl.value;
+  if (reason === 'Other') reason = customEl.value.trim();
+  if (!reason) { showAlert('Please select or enter a reason.'); return; }
+
+  const client = state.clients.find(c => c.id === clientId);
+  const reviews = { ...(client.documentReviews || {}) };
+  reviews[docKey] = {
+    status: 'rejected',
+    reviewedBy: state.currentUser?.id,
+    reviewedByName: state.currentUser?.fullName,
+    reviewedAt: new Date().toISOString(),
+    reason
+  };
+  const updates = { document_reviews: reviews };
+  const tempClient = { ...client, documentReviews: reviews };
+  updates.kyc_status = computeKycStatus(tempClient);
+  const { error } = await db.from('clients').update(updates).eq('id', clientId);
+  if (error) { showAlert('Rejection failed: ' + error.message); return; }
+  await logAudit('reject', 'kyc_document', clientId, { docKey, reason });
+  await saveTable('clients');
+  closeSubModal();
+
+  // Generate a new upload link with rejection message
+  await generateRejectionUploadLink(clientId, docKey, reason);
+}
+
+async function resetDocumentReview(clientId, docKey) {
+  const client = state.clients.find(c => c.id === clientId);
+  const reviews = { ...(client.documentReviews || {}) };
+  delete reviews[docKey];
+  const updates = { document_reviews: reviews };
+  const tempClient = { ...client, documentReviews: reviews };
+  updates.kyc_status = computeKycStatus(tempClient);
+  const { error } = await db.from('clients').update(updates).eq('id', clientId);
+  if (error) { showAlert('Reset failed: ' + error.message); return; }
+  await saveTable('clients');
+  closeModal();
+  openClientDetail(clientId);
+}
+
+async function generateRejectionUploadLink(clientId, docKey, reason) {
+  const client = state.clients.find(c => c.id === clientId);
+  const docLabel = KYC_DOC_TYPES.find(d => d.key === docKey)?.label || docKey;
+  const link = await createClientLink('upload', clientId, null, 7);
+  if (!link) return;
+  const url = buildLinkUrl(link);
+  const firstName = client.fullName.split(' ')[0];
+  const companyName = state.settings.companyName || 'G & P Finance';
+  const message = `Hello ${firstName},\n\nThe ${docLabel} you submitted needs to be re-uploaded.\n\nReason: ${reason}\n\nPlease upload a corrected version here:\n${url}\n\nThis link is valid for 7 days.\n\n${companyName}`;
+  const waUrl = `https://wa.me/${(client.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-lg">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Rejection Message Ready</h2>
+          <button onclick="closeModal(); openClientDetail('${clientId}');" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+            <div class="text-xs font-medium text-red-900 mb-1">Rejected Document</div>
+            <div class="text-sm text-red-900">${escapeHtml(docLabel)}</div>
+            <div class="text-xs text-red-800 mt-2">Reason: ${escapeHtml(reason)}</div>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div class="text-xs font-medium text-blue-900 mb-1">WhatsApp Message</div>
+            <div class="text-xs text-blue-900 whitespace-pre-wrap">${escapeHtml(message)}</div>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+            Review the message before sending. Ensure the phone number ${escapeHtml(client.phone)} is in international format (+264...).
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
+          <button onclick="navigator.clipboard.writeText(\`${message.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`).then(() => showAlert('Message copied'))" class="btn-secondary text-sm">Copy Message</button>
+          <a href="${waUrl}" target="_blank" class="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium">Send via WhatsApp</a>
+          <button onclick="closeModal(); openClientDetail('${clientId}');" class="btn-secondary text-sm">Done</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =====================================================
+// ADMIN UPLOAD - Staff uploads on behalf of client
+// =====================================================
+function openAdminUploadModal(clientId) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <div>
+            <h2 class="font-semibold text-lg">Upload Documents for Client</h2>
+            <div class="text-sm text-slate-500 mt-1">${escapeHtml(client.fullName)}</div>
+          </div>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-900">
+            Use this for walk-in clients or those without smartphones. Uploads will be marked as staff-uploaded in the audit trail.
+          </div>
+          <div id="admin-upload-form" class="space-y-3"></div>
+          <button onclick="submitAdminUploads('${clientId}')" id="admin-submit-btn" class="btn-primary w-full mt-4">Upload Documents</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const formEl = document.getElementById('admin-upload-form');
+  formEl.innerHTML = KYC_DOC_TYPES.map(d => `
+    <div class="border border-slate-200 rounded-lg p-3">
+      <label class="text-sm font-medium">${d.icon} ${d.label}${d.multiPage ? ' (multiple pages allowed)' : ''}</label>
+      <input type="file" id="admin-file-${d.key}" accept="image/*,application/pdf" ${d.multiPage ? 'multiple' : ''} class="mt-2" style="font-size:14px">
+      <div id="admin-preview-${d.key}" class="mt-2 text-xs text-slate-600"></div>
+    </div>
+  `).join('');
+  // Add change listeners
+  KYC_DOC_TYPES.forEach(d => {
+    const inp = document.getElementById(`admin-file-${d.key}`);
+    inp.addEventListener('change', () => {
+      const files = Array.from(inp.files);
+      document.getElementById(`admin-preview-${d.key}`).textContent = files.length ? `${files.length} file(s) selected: ${files.map(f => f.name).join(', ')}` : '';
+    });
+  });
+}
+
+async function submitAdminUploads(clientId) {
+  const btn = document.getElementById('admin-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  const client = state.clients.find(c => c.id === clientId);
+  const updates = {};
+  const sources = { ...(client.documentSources || {}) };
+  const pages = { ...(client.documentPages || {}) };
+  const reviews = { ...(client.documentReviews || {}) };
+  let uploadedCount = 0;
+  try {
+    for (const d of KYC_DOC_TYPES) {
+      const inp = document.getElementById(`admin-file-${d.key}`);
+      const files = Array.from(inp.files);
+      if (files.length === 0) continue;
+      const uploadedUrls = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.size > 10 * 1024 * 1024) { showAlert(`File ${file.name} too large (max 10MB). Skipped.`); continue; }
+        const ext = file.name.split('.').pop().toLowerCase();
+        const path = `${clientId}/${d.key}_${Date.now()}_${i}.${ext}`;
+        const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
+        if (upErr) throw new Error(`Failed to upload ${file.name}: ${upErr.message}`);
+        const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
+        uploadedUrls.push(urlData.publicUrl);
+      }
+      if (uploadedUrls.length > 0) {
+        updates[snakeCase(d.urlField)] = uploadedUrls[0];
+        if (uploadedUrls.length > 1) pages[d.key] = uploadedUrls.slice(1);
+        sources[d.key] = state.currentUser.id;
+        // Reset review status since it's a new upload
+        delete reviews[d.key];
+        uploadedCount += uploadedUrls.length;
+      }
+    }
+    if (uploadedCount === 0) { showAlert('No files selected.'); btn.disabled = false; btn.textContent = 'Upload Documents'; return; }
+    updates.document_sources = sources;
+    updates.document_pages = pages;
+    updates.document_reviews = reviews;
+    updates.documents_uploaded_at = new Date().toISOString();
+    const tempClient = { ...client, ...camelifyKeys(updates) };
+    updates.kyc_status = computeKycStatus(tempClient);
+    const { error } = await db.from('clients').update(updates).eq('id', clientId);
+    if (error) throw error;
+    await logAudit('admin_upload', 'client', clientId, { count: uploadedCount });
+    await saveTable('clients');
+    closeModal();
+    openClientDetail(clientId);
+    showAlert(`${uploadedCount} document(s) uploaded successfully.`, 'Uploaded');
+  } catch (e) {
+    showAlert('Upload failed: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Upload Documents';
+  }
+}
+
+function snakeCase(camel) {
+  return camel.replace(/[A-Z]/g, c => '_' + c.toLowerCase());
+}
+function camelifyKeys(obj) {
+  const result = {};
+  for (const k in obj) {
+    const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    result[camel] = obj[k];
+  }
+  return result;
+}
+
+function showKycWarningForClient(clientId) {
+  const box = document.getElementById('kyc-warning-box');
+  if (!box) return;
+  if (!clientId) { box.innerHTML = ''; return; }
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) { box.innerHTML = ''; return; }
+  const status = client.kycStatus || computeKycStatus(client);
+  if (status === 'Approved') {
+    box.innerHTML = `<div class="text-xs bg-green-50 border border-green-200 text-green-900 rounded px-3 py-2">✓ KYC documents approved</div>`;
+  } else if (status === 'Not Started') {
+    box.innerHTML = `<div class="text-xs bg-red-50 border border-red-200 text-red-900 rounded px-3 py-2">⚠ No KYC documents on file. Consider collecting documents before disbursing this loan.</div>`;
+  } else {
+    box.innerHTML = `<div class="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">⚠ KYC status: <strong>${status}</strong>. Review documents before disbursing.</div>`;
+  }
 }
 
 
