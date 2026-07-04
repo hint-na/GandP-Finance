@@ -2520,19 +2520,19 @@ function generateLoanAgreement(loanId) {
   }
 
   // ---- ACKNOWLEDGMENT & SIGNATURES ----
-  if (y > 210) { doc.addPage(); y = 20; }
-  y += 6;
+  if (y > 235) { doc.addPage(); y = 20; }
+  y += 4;
   doc.setFontSize(11).setFont('helvetica', 'bold');
-  doc.text('6. ACKNOWLEDGMENT', margin, y); y += 5;
+  doc.text('6. ACKNOWLEDGMENT', margin, y); y += 4;
   doc.setFontSize(9).setFont('helvetica', 'normal');
   const ack = 'The Borrower acknowledges that the terms of this agreement, including the total cost of credit and the Annual Percentage Rate, have been explained and understood. The Borrower confirms that the information provided is true and correct, and that this loan is being taken voluntarily.';
   const ackLines = doc.splitTextToSize(ack, pageW - margin*2);
-  doc.text(ackLines, margin, y); y += ackLines.length * 4 + 10;
+  doc.text(ackLines, margin, y); y += ackLines.length * 4 + 6;
 
   const sigY = y;
   const colW = (pageW - margin*2 - 20) / 2;
-  const sigLineY = sigY + 22;  // Y coordinate of the signature line
-  const sigBoxHeight = 20;      // Space above the line for signature image
+  const sigLineY = sigY + 16;   // Y coordinate of the signature line
+  const sigBoxHeight = 14;      // Compact space above the line for signature image
 
   // Draw signature lines
   doc.setDrawColor(0).setLineWidth(0.3);
@@ -2542,8 +2542,6 @@ function generateLoanAgreement(loanId) {
   // ---- EMBED BORROWER SIGNATURE if loan is signed ----
   if (loan.signedAt && loan.signatureData && loan.signatureData.signature_image) {
     try {
-      // Place signature image above the line, centered in the borrower's column
-      // Signature image is roughly 500x200 aspect ratio (2.5:1); scale to fit box
       const sigW = colW - 4;
       const sigH = sigBoxHeight;
       doc.addImage(
@@ -2560,38 +2558,28 @@ function generateLoanAgreement(loanId) {
   }
 
   // Signed at / on details - fill in for borrower if signed
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   const signedDate = loan.signedAt ? new Date(loan.signedAt) : null;
   const signedDateStr = signedDate ? signedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '___________';
   const signedLocStr = loan.signedAt ? 'Electronically' : '_____________________';
 
-  doc.text(`Signed at ${signedLocStr} on ${signedDateStr}`, margin, sigLineY + 6);
-  doc.text(`Borrower: ${loan.signatureData?.name || client?.fullName || ''}`, margin, sigLineY + 10);
+  doc.text(`Signed at ${signedLocStr} on ${signedDateStr}`, margin, sigLineY + 4);
+  doc.text(`Borrower: ${loan.signatureData?.name || client?.fullName || ''}`, margin, sigLineY + 8);
   if (loan.signedAt && loan.signatureData?.id_number) {
-    doc.text(`ID Number: ${loan.signatureData.id_number}`, margin, sigLineY + 14);
+    doc.text(`ID Number: ${loan.signatureData.id_number}`, margin, sigLineY + 12);
   }
 
-  doc.text('Signed at _____________________ on ___________', margin + colW + 20, sigLineY + 6);
-  doc.text('For and on behalf of the Lender', margin + colW + 20, sigLineY + 10);
+  doc.text('Signed at _____________________ on ___________', margin + colW + 20, sigLineY + 4);
+  doc.text('For and on behalf of the Lender', margin + colW + 20, sigLineY + 8);
 
-  // ---- Electronic signature note (below signature block) if signed ----
+  // ---- Compact electronic signature note (below signature block) if signed ----
   if (loan.signedAt) {
-    let noteY = sigLineY + 24;
-    if (noteY > 260) { doc.addPage(); noteY = 20; }
+    let noteY = sigLineY + 18;
     doc.setDrawColor(200); doc.setLineWidth(0.2);
-    doc.line(margin, noteY, pageW - margin, noteY); noteY += 4;
+    doc.line(margin, noteY, pageW - margin, noteY); noteY += 3;
 
     doc.setFontSize(7).setFont('helvetica', 'italic').setTextColor(80);
-    const noteLines = [
-      `Electronically signed on ${signedDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} using an on-device signature capture.`,
-      `Signed by: ${loan.signatureData?.name || client?.fullName || ''}${loan.signatureData?.id_number ? '  ·  ID Number: ' + loan.signatureData.id_number : ''}`,
-      `The Borrower has confirmed reading the agreement and consented to electronic signing.`,
-      `This electronic signature is legally binding under the Electronic Transactions Act, 4 of 2019 (Namibia).`
-    ];
-    for (const line of noteLines) {
-      doc.text(line, margin, noteY);
-      noteY += 3.2;
-    }
+    doc.text(`Electronically signed on ${signedDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}. Signed by: ${loan.signatureData?.name || client?.fullName || ''}${loan.signatureData?.id_number ? ' · ID: ' + loan.signatureData.id_number : ''}. Legally binding under the Electronic Transactions Act, 4 of 2019 (Namibia).`, margin, noteY, { maxWidth: pageW - margin*2 });
     doc.setTextColor(0);
   }
 
@@ -2637,8 +2625,29 @@ function downloadLoanAgreement(loanId) {
 }
 
 function sendSignedAgreementWhatsApp(loanId) {
-  // Just calls downloadLoanAgreement — which detects signed state and shows the correct message + WhatsApp button
-  downloadLoanAgreement(loanId);
+  const loan = state.loans.find(l => l.id === loanId);
+  if (!loan) return;
+  const client = state.clients.find(c => c.id === loan.clientId);
+  if (!client?.phone) { showAlert('Client has no phone number on file.'); return; }
+  const companyName = state.settings.companyName || 'G & P Finance';
+  const doc = generateLoanAgreement(loanId);
+  if (!doc) return;
+  const safeName = (client.fullName || 'client').replace(/[^A-Za-z0-9]/g, '_');
+  const filename = `Signed_Loan_Agreement_${safeName}_${loanRef(loan)}.pdf`;
+  // Trigger PDF download so user has the file ready to attach
+  try {
+    doc.save(filename);
+  } catch (e) {
+    // Fallback: open in new tab
+    try { window.open(doc.output('bloburl'), '_blank'); } catch (err) { console.warn('PDF fallback failed:', err); }
+  }
+  logAudit('generate_pdf', 'loan', loanId, { document: 'signed_agreement', sent: 'whatsapp' });
+  // Compose WhatsApp URL and open in a new tab
+  const message = buildSignedAgreementMessage(loan, client, companyName);
+  const phone = (client.phone || '').replace(/[^0-9]/g, '');
+  const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  // Small delay so download initiates first, then WhatsApp opens
+  setTimeout(() => window.open(waUrl, '_blank'), 300);
 }
 
 function buildSignedAgreementMessage(loan, client, companyName) {
