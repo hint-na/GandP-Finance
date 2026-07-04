@@ -4123,22 +4123,42 @@ async function renderUploadPage(token) {
   if (!client) return renderPublicError(container, 'Client not found', 'We could not find your record. Please contact G & P Finance.');
 
   const companyName = 'G & P Finance';
+
+  // Check if this link is for specific documents only (rejection re-upload)
+  const requestedDocs = link.metadata?.requested_docs || null;
+  const rejectionReasons = link.metadata?.rejection_reasons || {};
+  const isTargeted = requestedDocs && requestedDocs.length > 0;
+
+  const allDocs = [
+    { key: 'selfie', label: 'Selfie Photo', help: 'A clear photo of your face', accept: 'image/*', capture: 'user', multiple: false },
+    { key: 'id_front', label: 'ID Card - Front', help: 'Clear photo of the front of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+    { key: 'id_back', label: 'ID Card - Back', help: 'Clear photo of the back of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+    { key: 'income_document', label: 'Latest Payslip', help: 'Photo or PDF of your most recent payslip (you can add multiple pages)', accept: 'image/*,application/pdf', multiple: true },
+    { key: 'bank_statement', label: 'Bank Statement', help: 'Latest 3 months (you can add multiple pages/photos)', accept: 'image/*,application/pdf', multiple: true }
+  ];
+  const docs = isTargeted ? allDocs.filter(d => requestedDocs.includes(d.key)) : allDocs;
+
   container.innerHTML = `
     <div class="max-w-md mx-auto">
       <div class="text-center mb-6">
         <div class="w-14 h-14 bg-blue-700 rounded-xl mx-auto flex items-center justify-center text-white font-bold text-lg mb-3">G&amp;P</div>
         <h1 class="text-xl font-bold text-slate-900">${companyName}</h1>
-        <p class="text-sm text-slate-500 mt-1">Document Upload</p>
+        <p class="text-sm text-slate-500 mt-1">${isTargeted ? 'Document Re-Upload' : 'Document Upload'}</p>
       </div>
       <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
         <div class="text-sm text-slate-700 mb-2">Hello <strong>${escapeHtml(client.full_name)}</strong>,</div>
-        <div class="text-sm text-slate-600">Please take clear photos of each document below and upload them. All fields are required.</div>
+        ${isTargeted ? `
+          <div class="text-sm text-slate-600 mb-3">We need you to re-upload the following document${docs.length > 1 ? 's' : ''}. Your other documents are approved and don't need to be resubmitted.</div>
+          ${docs.map(d => rejectionReasons[d.key] ? `<div class="bg-red-50 border border-red-200 rounded p-2 mt-2 text-xs text-red-900"><strong>${escapeHtml(d.label)}:</strong> ${escapeHtml(rejectionReasons[d.key])}</div>` : '').join('')}
+        ` : `
+          <div class="text-sm text-slate-600">Please take clear photos of each document below and upload them. All fields are required.</div>
+        `}
       </div>
 
       <div id="upload-form" class="space-y-3"></div>
 
       <div class="mt-6">
-        <button id="submit-uploads-btn" onclick="submitPublicUploads('${token}', '${client.id}')" class="btn-primary w-full" disabled>Submit Documents</button>
+        <button id="submit-uploads-btn" onclick="submitPublicUploads('${token}', '${client.id}')" class="btn-primary w-full" disabled>${isTargeted ? 'Resubmit Document' + (docs.length > 1 ? 's' : '') : 'Submit Documents'}</button>
       </div>
 
       <div class="text-center text-xs text-slate-500 mt-6">
@@ -4147,13 +4167,7 @@ async function renderUploadPage(token) {
     </div>
   `;
 
-  const docs = [
-    { key: 'selfie', label: 'Selfie Photo', help: 'A clear photo of your face', accept: 'image/*', capture: 'user', multiple: false },
-    { key: 'id_front', label: 'ID Card - Front', help: 'Clear photo of the front of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
-    { key: 'id_back', label: 'ID Card - Back', help: 'Clear photo of the back of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
-    { key: 'income_document', label: 'Latest Payslip', help: 'Photo or PDF of your most recent payslip (you can add multiple pages)', accept: 'image/*,application/pdf', multiple: true },
-    { key: 'bank_statement', label: 'Bank Statement', help: 'Latest 3 months (you can add multiple pages/photos)', accept: 'image/*,application/pdf', multiple: true }
-  ];
+  window._publicRequestedDocs = docs.map(d => d.key);
   const formEl = document.getElementById('upload-form');
   formEl.innerHTML = docs.map(d => `
     <div class="bg-white rounded-xl border border-slate-200 p-4">
@@ -4189,7 +4203,7 @@ function handlePublicFile(input, key, multiple) {
   } else {
     preview.innerHTML = `<div class="text-sm text-green-700 bg-green-50 border border-green-200 p-2 rounded">✓ ${files.length} file(s) selected: ${files.map(f => escapeHtml(f.name)).join(', ')}</div>`;
   }
-  const requiredKeys = ['selfie', 'id_front', 'id_back', 'income_document', 'bank_statement'];
+  const requiredKeys = window._publicRequestedDocs || ['selfie', 'id_front', 'id_back', 'income_document', 'bank_statement'];
   const allPresent = requiredKeys.every(k => window._publicUploads[k] && window._publicUploads[k].length > 0);
   document.getElementById('submit-uploads-btn').disabled = !allPresent;
 }
@@ -4200,8 +4214,19 @@ async function submitPublicUploads(token, clientId) {
   btn.textContent = 'Uploading...';
   const urlMap = { selfie: 'selfie_url', id_front: 'id_front_url', id_back: 'id_back_url', income_document: 'income_document_url', bank_statement: 'bank_statement_url' };
   const updates = {};
-  const pages = {};
-  const sources = {};
+  const isTargeted = !!window._publicRequestedDocs;
+
+  // For targeted re-upload, fetch existing client so we merge instead of overwrite
+  let existingClient = null;
+  if (isTargeted) {
+    const { data } = await db.from('clients').select('*').eq('id', clientId).maybeSingle();
+    existingClient = data || {};
+  }
+
+  const pages = isTargeted ? (existingClient.document_pages || {}) : {};
+  const sources = isTargeted ? (existingClient.document_sources || {}) : {};
+  const reviews = isTargeted ? (existingClient.document_reviews || {}) : {};
+
   try {
     for (const key of Object.keys(window._publicUploads)) {
       const files = window._publicUploads[key];
@@ -4217,15 +4242,22 @@ async function submitPublicUploads(token, clientId) {
       }
       if (uploadedUrls.length > 0) {
         updates[urlMap[key]] = uploadedUrls[0];
+        // Replace pages for this doc (fresh upload wipes old pages for this doc only)
         if (uploadedUrls.length > 1) pages[key] = uploadedUrls.slice(1);
+        else delete pages[key];
         sources[key] = 'client';
+        // Clear old review status for this document (fresh review needed)
+        delete reviews[key];
       }
     }
     updates.document_sources = sources;
     updates.document_pages = pages;
-    updates.document_reviews = {};
-    updates.kyc_status = 'In Review';
+    updates.document_reviews = reviews;
     updates.documents_uploaded_at = new Date().toISOString();
+    // Recompute KYC status based on merged state
+    const merged = { ...camelifyKeys(existingClient || {}), ...camelifyKeys(updates) };
+    updates.kyc_status = computeKycStatus(merged);
+
     const { error: updErr } = await db.from('clients').update(updates).eq('id', clientId);
     if (updErr) throw new Error('Failed to save: ' + updErr.message);
     await db.from('client_links').update({ completed_at: new Date().toISOString() }).eq('token', token);
@@ -4235,14 +4267,14 @@ async function submitPublicUploads(token, clientId) {
           <svg class="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         </div>
         <h1 class="text-xl font-bold text-slate-900">Thank You</h1>
-        <p class="text-sm text-slate-600 mt-2">Your documents have been submitted successfully.</p>
+        <p class="text-sm text-slate-600 mt-2">Your document${isTargeted ? '' : 's'} ha${isTargeted ? 's' : 've'} been submitted successfully.</p>
         <p class="text-sm text-slate-600 mt-1">G &amp; P Finance will contact you shortly.</p>
       </div>
     `;
   } catch (e) {
     alert('Upload failed: ' + e.message);
     btn.disabled = false;
-    btn.textContent = 'Submit Documents';
+    btn.textContent = isTargeted ? 'Resubmit Document' : 'Submit Documents';
   }
 }
 
@@ -4749,8 +4781,27 @@ async function resetDocumentReview(clientId, docKey) {
 async function generateRejectionUploadLink(clientId, docKey, reason) {
   const client = state.clients.find(c => c.id === clientId);
   const docLabel = KYC_DOC_TYPES.find(d => d.key === docKey)?.label || docKey;
-  const link = await createClientLink('upload', clientId, null, 7);
-  if (!link) return;
+  // Create link with metadata specifying which document(s) are requested
+  const token = generateToken();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  const metadata = {
+    requested_docs: [docKey],
+    rejection_reasons: { [docKey]: reason }
+  };
+  const record = {
+    token,
+    link_type: 'upload',
+    client_id: clientId,
+    loan_id: null,
+    expires_at: expiresAt.toISOString(),
+    metadata,
+    created_by: state.currentUser?.id || null
+  };
+  const { data: link, error } = await db.from('client_links').insert(record).select().single();
+  if (error) { showAlert('Could not generate link: ' + error.message); return; }
+  await saveTable('clientLinks');
+  await logAudit('create', 'client_link', link.id, { type: 'upload', targeted: [docKey] });
   const url = buildLinkUrl(link);
   const firstName = client.fullName.split(' ')[0];
   const companyName = state.settings.companyName || 'G & P Finance';
@@ -4768,6 +4819,9 @@ async function generateRejectionUploadLink(clientId, docKey, reason) {
             <div class="text-xs font-medium text-red-900 mb-1">Rejected Document</div>
             <div class="text-sm text-red-900">${escapeHtml(docLabel)}</div>
             <div class="text-xs text-red-800 mt-2">Reason: ${escapeHtml(reason)}</div>
+          </div>
+          <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-900">
+            The upload link will show <strong>only the ${escapeHtml(docLabel)}</strong> — the client won't need to re-upload other approved documents.
           </div>
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <div class="text-xs font-medium text-blue-900 mb-1">WhatsApp Message</div>
