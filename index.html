@@ -209,9 +209,15 @@
           <div class="text-xs text-slate-500">Loan Management</div>
         </div>
       </div>
-      <button onclick="toggleMobileSidebar(false)" class="hamburger-btn" aria-label="Close menu" style="display:none">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
+      <div class="flex items-center gap-1">
+        <button id="notification-bell" onclick="toggleNotifications()" aria-label="Notifications" style="position:relative; background:none; border:none; padding:6px; cursor:pointer; color:#475569;">
+          <svg style="width:22px; height:22px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          <span id="notification-badge" style="display:none; position:absolute; top:2px; right:2px; background:#ef4444; color:white; border-radius:10px; min-width:18px; height:18px; font-size:10px; font-weight:700; align-items:center; justify-content:center; padding:0 5px;">0</span>
+        </button>
+        <button onclick="toggleMobileSidebar(false)" class="hamburger-btn" aria-label="Close menu" style="display:none">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
     </div>
     <nav id="nav-menu" class="flex-1 p-3 space-y-1 overflow-y-auto"></nav>
     <div class="p-4 border-t border-slate-200">
@@ -230,7 +236,10 @@
         <div class="w-7 h-7 bg-blue-700 rounded-lg flex items-center justify-center text-white font-bold" style="font-size:10px">G&amp;P</div>
         <div class="font-semibold text-slate-900 text-sm" id="mobile-view-title">G &amp; P Finance</div>
       </div>
-      <div style="width:38px"></div>
+      <button id="mobile-notification-bell" onclick="toggleNotifications()" aria-label="Notifications" style="position:relative; background:none; border:none; padding:6px; cursor:pointer; color:#475569;">
+        <svg style="width:22px; height:22px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+        <span id="mobile-notification-badge" style="display:none; position:absolute; top:2px; right:2px; background:#ef4444; color:white; border-radius:10px; min-width:18px; height:18px; font-size:10px; font-weight:700; align-items:center; justify-content:center; padding:0 5px;">0</span>
+      </button>
     </div>
     <div id="view-container" class="p-8"></div>
   </main>
@@ -602,6 +611,12 @@ async function logout() {
   }
   await db.auth.signOut();
   state.currentUser = null;
+  state.notifications = [];
+  if (window._notificationChannel) {
+    db.removeChannel(window._notificationChannel);
+    window._notificationChannel = null;
+  }
+  document.title = window._originalTitle || 'G & P Finance';
   renderApp();
 }
 
@@ -708,6 +723,8 @@ async function doLogin() {
   btn.disabled = false; btn.textContent = 'Sign In';
   if (!result.ok) { showAlert(result.msg, 'Sign In Failed'); return; }
   await loadData();
+  await loadNotifications();
+  subscribeToNotifications();
   renderApp();
 }
 
@@ -4462,6 +4479,29 @@ async function submitPublicUploads(token, clientId) {
     const { error: updErr } = await db.from('clients').update(updates).eq('id', clientId);
     if (updErr) throw new Error('Failed to save: ' + updErr.message);
     await db.from('client_links').update({ completed_at: new Date().toISOString() }).eq('token', token);
+    // Create notification for staff
+    try {
+      const clientName = existingClient?.full_name || 'Client';
+      const isTargeted = !!window._publicRequestedDocs;
+      if (isTargeted) {
+        const docLabels = window._publicRequestedDocs.map(k => ({ selfie: 'Selfie', id_front: 'ID Front', id_back: 'ID Back', income_document: 'Payslip', bank_statement: 'Bank Statement' }[k] || k)).join(', ');
+        await db.rpc('create_broadcast_notification', {
+          p_event_type: 'reupload_submitted',
+          p_title: `${clientName} re-uploaded documents`,
+          p_message: `${docLabels} submitted for review`,
+          p_client_id: clientId,
+          p_loan_id: null
+        });
+      } else {
+        await db.rpc('create_broadcast_notification', {
+          p_event_type: 'upload_submitted',
+          p_title: `${clientName} uploaded KYC documents`,
+          p_message: 'All KYC documents submitted and ready for review',
+          p_client_id: clientId,
+          p_loan_id: null
+        });
+      }
+    } catch (e) { console.warn('Notification create failed:', e); }
     document.getElementById('public-container').innerHTML = `
       <div class="max-w-md mx-auto text-center py-12">
         <div class="w-16 h-16 bg-green-100 rounded-full mx-auto flex items-center justify-center mb-4">
@@ -4814,6 +4854,16 @@ async function submitSignature(token, loanId) {
     const { error: upErr } = await db.from('loans').update(updates).eq('id', loanId);
     if (upErr) throw upErr;
     await db.from('client_links').update({ completed_at: now }).eq('token', token);
+    // Notify staff
+    try {
+      await db.rpc('create_broadcast_notification', {
+        p_event_type: 'agreement_signed',
+        p_title: `${name} signed loan agreement`,
+        p_message: lenderSignatureData ? 'Both signatures applied. Ready for disbursement.' : 'Awaiting lender countersignature.',
+        p_client_id: null,
+        p_loan_id: loanId
+      });
+    } catch (e) { console.warn('Notification create failed:', e); }
     document.getElementById('public-container').innerHTML = `
       <div class="max-w-md mx-auto text-center py-12">
         <div class="w-16 h-16 bg-green-100 rounded-full mx-auto flex items-center justify-center mb-4">
@@ -5463,6 +5513,236 @@ function showKycWarningForClient(clientId) {
 }
 
 
+
+// =====================================================
+// NOTIFICATIONS - In-app real-time notifications
+// =====================================================
+state.notifications = [];
+state.notificationsOpen = false;
+window._notificationChannel = null;
+window._notificationSoundEnabled = true;
+window._originalTitle = document.title;
+
+async function loadNotifications() {
+  const { data, error } = await db.from('notifications')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) { console.warn('Notifications load error:', error); return; }
+  state.notifications = (data || []).map(snakeToCamel);
+  updateNotificationBadge();
+}
+
+function subscribeToNotifications() {
+  if (!state.currentUser) return;
+  // Unsubscribe from previous channel if any
+  if (window._notificationChannel) {
+    db.removeChannel(window._notificationChannel);
+    window._notificationChannel = null;
+  }
+  window._notificationChannel = db.channel('notifications-channel')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'notifications'
+    }, payload => {
+      const notif = snakeToCamel(payload.new);
+      // Only show if it's for this user or broadcast
+      if (notif.recipientId && notif.recipientId !== state.currentUser.id) return;
+      state.notifications.unshift(notif);
+      if (state.notifications.length > 50) state.notifications = state.notifications.slice(0, 50);
+      updateNotificationBadge();
+      playNotificationSound();
+      // If dropdown is open, refresh it
+      if (state.notificationsOpen) renderNotificationDropdown();
+    })
+    .subscribe();
+}
+
+function unreadNotifications() {
+  return state.notifications.filter(n => !n.readAt);
+}
+
+function updateNotificationBadge() {
+  const count = unreadNotifications().length;
+  const badges = [document.getElementById('notification-badge'), document.getElementById('mobile-notification-badge')];
+  badges.forEach(badge => {
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  });
+  // Update tab title
+  if (count > 0) {
+    document.title = `(${count}) ${window._originalTitle}`;
+  } else {
+    document.title = window._originalTitle;
+  }
+}
+
+function playNotificationSound() {
+  if (!window._notificationSoundEnabled) return;
+  try {
+    // Short chime using Web Audio API - no external file needed
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1108, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+    // Also try browser Notification API if permission granted
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      const latest = state.notifications[0];
+      if (latest) {
+        new Notification(latest.title, { body: latest.message, icon: '/favicon.svg' });
+      }
+    }
+  } catch (e) { /* silent */ }
+}
+
+function toggleNotifications() {
+  state.notificationsOpen = !state.notificationsOpen;
+  if (state.notificationsOpen) {
+    renderNotificationDropdown();
+    // Request browser notification permission first time
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  } else {
+    const dd = document.getElementById('notification-dropdown');
+    if (dd) dd.remove();
+  }
+}
+
+function renderNotificationDropdown() {
+  // Remove existing
+  const existing = document.getElementById('notification-dropdown');
+  if (existing) existing.remove();
+
+  const notifs = state.notifications.slice(0, 20);
+  const dropdown = document.createElement('div');
+  dropdown.id = 'notification-dropdown';
+  dropdown.style.cssText = 'position:fixed; top:60px; right:16px; width:360px; max-width:calc(100vw - 32px); max-height:70vh; background:white; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15); z-index:100; overflow:hidden; display:flex; flex-direction:column;';
+  const items = notifs.length === 0
+    ? `<div class="p-8 text-center text-sm text-slate-500">No notifications yet.<br>You'll see client uploads and signatures here.</div>`
+    : notifs.map(n => {
+        const isUnread = !n.readAt;
+        const timeAgo = notifTimeAgo(n.createdAt);
+        const iconMap = {
+          upload_submitted: '📄',
+          agreement_signed: '✍️',
+          reupload_submitted: '🔁',
+          loan_due_soon: '⏰',
+          loan_overdue: '⚠️'
+        };
+        const icon = iconMap[n.eventType] || '🔔';
+        return `<div onclick="handleNotificationClick('${n.id}')" style="padding:12px 14px; border-bottom:1px solid #f1f5f9; cursor:pointer; ${isUnread ? 'background:#eff6ff;' : ''} display:flex; gap:10px; align-items:flex-start;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='${isUnread ? '#eff6ff' : 'white'}'">
+          <div style="font-size:20px; flex-shrink:0;">${icon}</div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:${isUnread ? '600' : '500'}; font-size:13px; color:#0f172a;">${escapeHtml(n.title)}</div>
+            <div style="font-size:12px; color:#64748b; margin-top:2px; line-height:1.4;">${escapeHtml(n.message)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${timeAgo}</div>
+          </div>
+          ${isUnread ? '<div style="width:8px; height:8px; background:#3b82f6; border-radius:50%; flex-shrink:0; margin-top:6px;"></div>' : ''}
+        </div>`;
+      }).join('');
+  const unreadCount = unreadNotifications().length;
+  dropdown.innerHTML = `
+    <div style="padding:12px 14px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#f8fafc;">
+      <div style="font-weight:600; font-size:14px;">Notifications</div>
+      <div style="display:flex; gap:8px;">
+        ${unreadCount > 0 ? `<button onclick="markAllNotificationsRead()" style="background:none; border:none; color:#3b82f6; font-size:12px; cursor:pointer; padding:2px 6px;">Mark all read</button>` : ''}
+        <button onclick="toggleNotifications()" style="background:none; border:none; color:#64748b; cursor:pointer; padding:2px 6px; font-size:16px; line-height:1;">✕</button>
+      </div>
+    </div>
+    <div style="overflow-y:auto; flex:1;">${items}</div>
+    <div style="padding:8px 14px; border-top:1px solid #e2e8f0; background:#f8fafc; display:flex; justify-content:space-between; align-items:center;">
+      <label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" ${window._notificationSoundEnabled ? 'checked' : ''} onchange="window._notificationSoundEnabled = this.checked; localStorage.setItem('gp_notif_sound', this.checked ? '1' : '0');" style="width:auto;">
+        Sound alerts
+      </label>
+    </div>
+  `;
+  document.body.appendChild(dropdown);
+
+  // Close if user clicks outside
+  setTimeout(() => {
+    document.addEventListener('click', closeNotifOnOutsideClick);
+  }, 50);
+}
+
+function closeNotifOnOutsideClick(e) {
+  const dd = document.getElementById('notification-dropdown');
+  const bell = document.getElementById('notification-bell');
+  if (dd && !dd.contains(e.target) && bell && !bell.contains(e.target)) {
+    state.notificationsOpen = false;
+    dd.remove();
+    document.removeEventListener('click', closeNotifOnOutsideClick);
+  }
+}
+
+async function handleNotificationClick(notifId) {
+  const notif = state.notifications.find(n => n.id === notifId);
+  if (!notif) return;
+  // Mark as read
+  if (!notif.readAt) {
+    notif.readAt = new Date().toISOString();
+    await db.from('notifications').update({ read_at: notif.readAt }).eq('id', notifId);
+    updateNotificationBadge();
+  }
+  // Close dropdown
+  state.notificationsOpen = false;
+  const dd = document.getElementById('notification-dropdown');
+  if (dd) dd.remove();
+  // Navigate to relevant entity
+  if (notif.loanId) {
+    openLoanDetail(notif.loanId);
+  } else if (notif.clientId) {
+    openClientDetail(notif.clientId);
+  }
+}
+
+async function markAllNotificationsRead() {
+  const unread = unreadNotifications();
+  if (unread.length === 0) return;
+  const now = new Date().toISOString();
+  const ids = unread.map(n => n.id);
+  const { error } = await db.from('notifications').update({ read_at: now }).in('id', ids);
+  if (error) { showAlert('Could not mark as read: ' + error.message); return; }
+  unread.forEach(n => n.readAt = now);
+  updateNotificationBadge();
+  renderNotificationDropdown();
+}
+
+function notifTimeAgo(iso) {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+// Initialise from localStorage
+try {
+  const saved = localStorage.getItem('gp_notif_sound');
+  if (saved !== null) window._notificationSoundEnabled = saved === '1';
+} catch (e) {}
+
+
 // =====================================================
 // INIT
 // =====================================================
@@ -5486,6 +5766,8 @@ function showKycWarningForClient(clientId) {
   const sessionRestored = await restoreSession();
   if (sessionRestored) {
     await loadData();
+    await loadNotifications();
+    subscribeToNotifications();
   }
   renderApp();
 })();
