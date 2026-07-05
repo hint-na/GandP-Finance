@@ -3021,7 +3021,172 @@ function renderSettings() {
   else if (tab === 'signature') body = renderSettingsSignature();
   else if (tab === 'notifications') body = renderSettingsNotifications();
   return `
-    <div class="mb-6">
+    <!-- NOTIFICATIONS TAB -->
+<div id="notifications-tab" style="display: none; padding: 2rem;">
+  <h2 style="font-size: 1.5rem; margin-bottom: 1rem; color: #1e3a8a;">Push Notifications</h2>
+  
+  <div style="background: #f3f4f6; padding: 1.5rem; border-radius: 0.5rem; margin-bottom: 2rem;">
+    <p style="margin: 0; color: #374151; font-size: 0.95rem;">
+      Enable push notifications to receive alerts about loan approvals, document uploads, and important updates on your mobile device or desktop.
+    </p>
+  </div>
+
+  <div style="margin-bottom: 2rem;">
+    <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: #1f2937;">Notification Status</h3>
+    <div id="notification-status" style="padding: 1rem; background: #e0e7ff; border-left: 4px solid #4f46e5; border-radius: 0.25rem; color: #3730a3;">
+      <strong>Checking browser support...</strong>
+    </div>
+  </div>
+
+  <div style="margin-bottom: 2rem;">
+    <button 
+      id="request-notification-btn" 
+      style="
+        background-color: #1e40af;
+        color: white;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 0.375rem;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      "
+      onclick="requestNotificationPermission()"
+    >
+      Request Push Notification Permission
+    </button>
+  </div>
+
+  <div style="margin-bottom: 2rem;">
+    <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: #1f2937;">Notification Sound</h3>
+    <label style="display: flex; align-items: center; cursor: pointer;">
+      <input 
+        type="checkbox" 
+        id="notification-sound-toggle" 
+        style="margin-right: 0.75rem; width: 18px; height: 18px; cursor: pointer;"
+        onchange="localStorage.setItem('notification-sound', this.checked ? 'true' : 'false')"
+      />
+      <span style="color: #374151;">Play sound when receiving notifications</span>
+    </label>
+  </div>
+
+  <div>
+    <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: #1f2937;">Active Subscriptions</h3>
+    <div id="subscriptions-list" style="background: #f9fafb; padding: 1rem; border-radius: 0.375rem; border: 1px solid #e5e7eb;">
+      <p style="margin: 0; color: #6b7280; font-size: 0.875rem;"><em>Loading subscriptions...</em></p>
+    </div>
+  </div>
+</div>
+
+<script>
+async function requestNotificationPermission() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    alert('Your browser does not support push notifications');
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    
+    if (permission === 'granted') {
+      const registration = await navigator.serviceWorker.ready;
+      const publicKey = 'BH5RlyNgMQlPJvhR_Z8xRUKIoRzJWWW9vLR6xGLyMxd-HhYsmhJDU7F9PwVkjz5zGBqXPgvXFLDV5BrRvBOOpfU';
+      
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+
+      await savePushSubscription(subscription);
+      alert('✅ Push notifications enabled!');
+      updateNotificationStatus();
+      loadSubscriptions();
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('Error: ' + error.message);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function savePushSubscription(subscription) {
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .insert([{
+      endpoint: subscription.endpoint,
+      p256dh: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('p256dh')))),
+      auth: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('auth')))),
+      recipient_id: (await supabase.auth.getUser()).data.user?.id || null,
+      created_at: new Date().toISOString()
+    }]);
+  
+  if (error) throw error;
+  console.log('✅ Subscription saved');
+}
+
+async function loadSubscriptions() {
+  const list = document.getElementById('subscriptions-list');
+  const { data } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint, created_at')
+    .order('created_at', { ascending: false });
+
+  if (!data || data.length === 0) {
+    list.innerHTML = '<p style="margin: 0; color: #6b7280; font-size: 0.875rem;"><em>No active subscriptions</em></p>';
+    return;
+  }
+
+  let html = '<div style="font-size: 0.875rem;">';
+  data.forEach((sub, idx) => {
+    const created = new Date(sub.created_at).toLocaleString();
+    html += `<div style="padding: 0.75rem 0; border-bottom: 1px solid #e5e7eb;"><p style="margin: 0; color: #1f2937;">Device ${idx + 1}</p><p style="margin: 0.25rem 0; color: #6b7280; font-family: monospace; font-size: 0.75rem;">${sub.endpoint.substring(0, 50)}...</p><p style="margin: 0; color: #9ca3af; font-size: 0.75rem;">${created}</p></div>`;
+  });
+  list.innerHTML = html + '</div>';
+}
+
+function updateNotificationStatus() {
+  const statusDiv = document.getElementById('notification-status');
+  const permission = Notification.permission;
+  
+  if (permission === 'granted') {
+    statusDiv.innerHTML = '<strong>✅ Push notifications enabled</strong>';
+    statusDiv.style.background = '#dcfce7';
+    statusDiv.style.borderColor = '#22c55e';
+    statusDiv.style.color = '#166534';
+    document.getElementById('request-notification-btn').style.display = 'none';
+  } else if (permission === 'denied') {
+    statusDiv.innerHTML = '<strong>❌ Notifications blocked</strong>';
+    statusDiv.style.background = '#fee2e2';
+    statusDiv.style.borderColor = '#dc2626';
+    statusDiv.style.color = '#991b1b';
+  }
+}
+
+// Load on page ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    updateNotificationStatus();
+    loadSubscriptions();
+    document.getElementById('notification-sound-toggle').checked = localStorage.getItem('notification-sound') !== 'false';
+  });
+} else {
+  updateNotificationStatus();
+  loadSubscriptions();
+  document.getElementById('notification-sound-toggle').checked = localStorage.getItem('notification-sound') !== 'false';
+}
+</script>
+<div class="mb-6">
       <h1 class="text-2xl font-bold text-slate-900">Settings</h1>
       <p class="text-slate-500 text-sm mt-1">Configure company details, loan products, late penalties, signature, and notifications</p>
     </div>
