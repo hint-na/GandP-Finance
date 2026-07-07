@@ -4487,11 +4487,10 @@ async function submitPublicUploads(token, clientId) {
       const files = window._publicUploads[key];
       const uploadedUrls = [];
       for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const ext = file.name.split('.').pop().toLowerCase();
+        const file = await compressImageFile(files[i]);
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
         const path = `${clientId}/${key}_${Date.now()}_${i}.${ext}`;
-        const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
-        if (upErr) throw new Error(`Failed to upload ${key}: ${upErr.message}`);
+        await uploadWithRetry(path, file).catch(e => { throw new Error(`Failed to upload ${key}: ${e.message}`); });
         const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
         uploadedUrls.push(urlData.publicUrl);
       }
@@ -5956,6 +5955,44 @@ function renderPushToggleUI(currentlyEnabled) {
 // ONLINE LOAN APPLICATIONS
 // Public form (?apply) + Admin review workflow
 // =====================================================
+
+// Shrink photos in the browser before upload. A phone camera photo is
+// 4–12MB; a document is perfectly readable at ~1600px / ~250KB. This makes
+// uploads roughly 10–20x faster and far more reliable on mobile data.
+async function compressImageFile(file, maxDim = 1600, quality = 0.8) {
+  if (!file.type || !file.type.startsWith('image/')) return file; // PDFs etc. untouched
+  if (file.size < 400 * 1024) return file; // already small
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+    if (blob && blob.size < file.size) {
+      return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    }
+    return file;
+  } catch (e) {
+    console.warn('Compression skipped:', e);
+    return file; // never block the upload because compression failed
+  }
+}
+
+// Upload with automatic retries (handles brief mobile network drops)
+async function uploadWithRetry(path, file, attempts = 3) {
+  let lastErr = null;
+  for (let a = 1; a <= attempts; a++) {
+    const { error } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
+    if (!error) return;
+    lastErr = error;
+    if (a < attempts) await new Promise(r => setTimeout(r, 1500 * a)); // 1.5s, 3s backoff
+  }
+  throw new Error(lastErr ? lastErr.message : 'Upload failed');
+}
+
 state.applications = state.applications || [];
 state.currentApplicationsTab = 'Pending';
 
@@ -6145,7 +6182,13 @@ async function submitApplication() {
   if (phoneDigits.length < 9) { alert('Please check your mobile number — it looks too short.'); return; }
 
   btn.disabled = true;
-  const appId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }));
+  // Keep the same application ID and completed-upload record across retries,
+  // so tapping Submit again RESUMES instead of re-uploading everything.
+  if (!window._applyAppId) {
+    window._applyAppId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }));
+    window._applyDone = {};
+  }
+  const appId = window._applyAppId;
   const record = {
     id: appId,
     full_name: name,
@@ -6164,13 +6207,21 @@ async function submitApplication() {
       const files = window._applyUploads[d.key] || [];
       const uploadedUrls = [];
       for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+        const doneKey = `${d.key}_${i}_${files[i].name}_${files[i].size}`;
+        // Skip files that already uploaded successfully on a previous attempt
+        if (window._applyDone[doneKey]) {
+          uploadedUrls.push(window._applyDone[doneKey]);
+          done++;
+          continue;
+        }
+        btn.textContent = `Preparing ${done + 1} of ${totalFiles}...`;
+        const file = await compressImageFile(files[i]);
         btn.textContent = `Uploading ${done + 1} of ${totalFiles}...`;
         const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-        const path = `applications/${appId}/${d.key}_${Date.now()}_${i}.${ext}`;
-        const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
-        if (upErr) throw new Error(`Failed to upload ${d.label}: ${upErr.message}`);
+        const path = `applications/${appId}/${d.key}_${i}.${ext}`;
+        await uploadWithRetry(path, file).catch(e => { throw new Error(`Failed to upload ${d.label} (page ${i + 1}): ${e.message}`); });
         const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
+        window._applyDone[doneKey] = urlData.publicUrl;
         uploadedUrls.push(urlData.publicUrl);
         done++;
       }
@@ -6213,7 +6264,7 @@ async function submitApplication() {
       </div>
     `;
   } catch (e) {
-    alert(e.message);
+    alert(e.message + '\n\nPlease check your network signal and tap "Submit Application" again — pages already uploaded will NOT be re-uploaded, it will continue from where it stopped.');
     btn.disabled = false;
     btn.textContent = 'Submit Application';
   }
