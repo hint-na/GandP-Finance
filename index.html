@@ -327,7 +327,7 @@ function clientRefById(clientId) {
 // =====================================================
 async function loadData() {
   try {
-    const [clientsRes, loansRes, paymentsRes, productsRes, settingsRes, auditRes, profilesRes, linksRes] = await Promise.all([
+    const [clientsRes, loansRes, paymentsRes, productsRes, settingsRes, auditRes, profilesRes, linksRes, applicationsRes] = await Promise.all([
       db.from('clients').select('*').order('registration_date', {ascending: false}),
       db.from('loans').select('*').order('disbursement_date', {ascending: false}),
       db.from('payments').select('*').order('payment_date', {ascending: false}),
@@ -335,7 +335,8 @@ async function loadData() {
       db.from('settings').select('*').eq('id', 1).maybeSingle(),
       db.from('audit').select('*').order('timestamp', {ascending: false}).limit(500),
       db.from('profiles').select('*'),
-      db.from('client_links').select('*').order('created_at', {ascending: false})
+      db.from('client_links').select('*').order('created_at', {ascending: false}),
+      db.from('loan_applications').select('*').order('submitted_at', {ascending: false})
     ]);
     state.clients = (clientsRes.data || []).map(snakeToCamel);
     state.loans = (loansRes.data || []).map(snakeToCamel);
@@ -345,6 +346,7 @@ async function loadData() {
     state.audit = (auditRes.data || []).map(snakeToCamel);
     state.users = (profilesRes.data || []).map(snakeToCamel);
     state.clientLinks = (linksRes.data || []).map(snakeToCamel);
+    state.applications = (applicationsRes.data || []).map(snakeToCamel);
     // Normalize field names
     if (state.settings.penaltyConfig) state.settings.penalty = state.settings.penaltyConfig;
     if (!state.settings.penalty) state.settings.penalty = { enabled: false, type: 'percentage', amount: 5, basis: 'instalment', frequency: 'monthly', gracePeriodDays: 3, maxPenaltyPercent: 100 };
@@ -375,10 +377,10 @@ async function saveSettings() {
 
 async function saveTable(name) {
   // Reload from Supabase to sync state
-  const tableMap = { clients: 'clients', loans: 'loans', payments: 'payments', products: 'products', audit: 'audit', users: 'profiles', clientLinks: 'client_links' };
+  const tableMap = { clients: 'clients', loans: 'loans', payments: 'payments', products: 'products', audit: 'audit', users: 'profiles', clientLinks: 'client_links', applications: 'loan_applications' };
   const table = tableMap[name];
   if (!table) return;
-  const orderMap = { clients: 'registration_date', loans: 'disbursement_date', payments: 'payment_date', audit: 'timestamp', clientLinks: 'created_at' };
+  const orderMap = { clients: 'registration_date', loans: 'disbursement_date', payments: 'payment_date', audit: 'timestamp', clientLinks: 'created_at', applications: 'submitted_at' };
   let q = db.from(table).select('*');
   if (orderMap[name]) q = q.order(orderMap[name], { ascending: false });
   if (name === 'audit') q = q.limit(500);
@@ -736,6 +738,7 @@ function buildNav() {
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', show: true },
     { id: 'loans', label: 'Loans', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', show: can('read','loans') },
     { id: 'clients', label: 'Clients', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', show: can('read','clients') },
+    { id: 'applications', label: 'Applications', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', show: state.currentUser?.role === 'Administrator', badge: pendingApplicationsCount() },
     { id: 'payments', label: 'Payments', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z', show: can('read','payments') },
     { id: 'reminders', label: 'Reminders', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9', show: can('read','payments') },
     { id: 'reports', label: 'Reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', show: can('read','reports') },
@@ -747,7 +750,8 @@ function buildNav() {
   const html = items.filter(i => i.show).map(i => `
     <button onclick="navigate('${i.id}')" id="nav-${i.id}" class="w-full text-left px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium ${state.currentView===i.id?'nav-active':'nav-inactive'}">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${i.icon}"/></svg>
-      ${i.label}
+      <span class="flex-1">${i.label}</span>
+      ${i.badge ? `<span class="ml-auto text-[11px] font-bold bg-red-600 text-white rounded-full px-2 py-0.5">${i.badge}</span>` : ''}
     </button>
   `).join('');
   document.getElementById('nav-menu').innerHTML = html;
@@ -788,6 +792,7 @@ function render() {
   if (v === 'dashboard') c.innerHTML = renderDashboard();
   else if (v === 'loans') c.innerHTML = renderLoans();
   else if (v === 'clients') c.innerHTML = renderClients();
+  else if (v === 'applications') c.innerHTML = renderApplications();
   else if (v === 'payments') c.innerHTML = renderPayments();
   else if (v === 'reminders') c.innerHTML = renderReminders();
   else if (v === 'reports') c.innerHTML = renderReports();
@@ -810,7 +815,7 @@ function render() {
   const titleEl = document.getElementById('mobile-view-title');
   if (titleEl) {
     const titles = {
-      dashboard: 'Dashboard', loans: 'Loans', clients: 'Clients',
+      dashboard: 'Dashboard', loans: 'Loans', clients: 'Clients', applications: 'Applications',
       payments: 'Payments', reminders: 'Reminders', reports: 'Reports',
       users: 'Users', audit: 'Audit Log', data: 'Backup & Export', settings: 'Settings'
     };
@@ -1043,7 +1048,7 @@ function renderLoans() {
   `;
 }
 
-function openLoanForm(editId) {
+function openLoanForm(editId, preselectClientId) {
   if (editId && !requirePerm('update','loans')) return;
   if (!editId && !requirePerm('create','loans')) return;
   if (state.clients.length === 0) {
@@ -1073,7 +1078,7 @@ function openLoanForm(editId) {
             <label>Client *</label>
             <select id="f-clientId" required ${editing ? 'disabled' : ''} onchange="showKycWarningForClient(this.value)">
               <option value="">Select client...</option>
-              ${state.clients.map(c => `<option value="${c.id}" ${editing?.clientId===c.id?'selected':''}>${escapeHtml(c.fullName)} - ${escapeHtml(c.phone)}</option>`).join('')}
+              ${state.clients.map(c => `<option value="${c.id}" ${(editing?.clientId===c.id || (!editing && preselectClientId===c.id))?'selected':''}>${escapeHtml(c.fullName)} - ${escapeHtml(c.phone)}</option>`).join('')}
             </select>
             ${editing ? '<div class="text-xs text-slate-500 mt-1">Client cannot be changed on existing loans</div>' : ''}
             <div id="kyc-warning-box" class="mt-2"></div>
@@ -1111,6 +1116,7 @@ function openLoanForm(editId) {
   `;
   document.getElementById('modal-container').innerHTML = modal;
   if (editing) updateLoanCalc();
+  if (!editing && preselectClientId) setTimeout(() => showKycWarningForClient(preselectClientId), 50);
 }
 
 function updateLoanCalc() {
@@ -4345,6 +4351,7 @@ function checkPublicRoute() {
   const uploadToken = params.get('upload');
   const signToken = params.get('sign');
   const agreementToken = params.get('agreement');
+  if (params.has('apply')) { renderApplyPage(); return true; }
   if (uploadToken) { renderUploadPage(uploadToken); return true; }
   if (signToken) { renderSignaturePage(signToken); return true; }
   if (agreementToken) { renderAgreementViewPage(agreementToken); return true; }
@@ -5751,7 +5758,9 @@ async function handleNotificationClick(notifId) {
   const dd = document.getElementById('notification-dropdown');
   if (dd) dd.remove();
   // Navigate to relevant entity
-  if (notif.loanId) {
+  if ((notif.eventType || '').startsWith('application')) {
+    navigate('applications');
+  } else if (notif.loanId) {
     openLoanDetail(notif.loanId);
   } else if (notif.clientId) {
     openClientDetail(notif.clientId);
@@ -5942,6 +5951,613 @@ function renderPushToggleUI(currentlyEnabled) {
     </div>
   `;
 }
+
+// =====================================================
+// ONLINE LOAN APPLICATIONS
+// Public form (?apply) + Admin review workflow
+// =====================================================
+state.applications = state.applications || [];
+state.currentApplicationsTab = 'Pending';
+
+const APPLY_DOC_TYPES = [
+  { key: 'selfie', label: 'Selfie Photo', help: 'A clear photo of your face', accept: 'image/*', capture: 'user', multiple: false },
+  { key: 'id_front', label: 'ID Card — Front', help: 'Clear photo of the front of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+  { key: 'id_back', label: 'ID Card — Back', help: 'Clear photo of the back of your Namibian ID', accept: 'image/*', capture: 'environment', multiple: false },
+  { key: 'income_document', label: 'Latest Payslip', help: 'Photo or PDF of your most recent payslip — you can add several pages', accept: 'image/*,application/pdf', multiple: true },
+  { key: 'bank_statement', label: '3-Month Bank Statement', help: 'Add ALL pages of your last 3 months\u2019 bank statement. You can add photos one at a time — tap "Add pages" as many times as you need.', accept: 'image/*,application/pdf', multiple: true }
+];
+const APPLY_DOC_LABELS = { selfie: 'Selfie', id_front: 'ID Front', id_back: 'ID Back', income_document: 'Payslip', bank_statement: 'Bank Statement' };
+
+function pendingApplicationsCount() {
+  return (state.applications || []).filter(a => a.status === 'Pending').length;
+}
+
+function applicationRef(app) {
+  if (!app) return '';
+  return 'APP-' + (app.id ? app.id.substring(0, 8).toUpperCase() : '');
+}
+
+// -----------------------------------------------------
+// PUBLIC APPLICATION FORM (?apply)
+// -----------------------------------------------------
+function renderApplyPage() {
+  document.getElementById('login-container').classList.add('hidden');
+  document.getElementById('app-container').classList.add('hidden');
+  const container = document.createElement('div');
+  container.id = 'public-container';
+  container.className = 'min-h-screen bg-slate-50 py-6 px-4';
+  document.body.appendChild(container);
+
+  window._applyUploads = {};
+  APPLY_DOC_TYPES.forEach(d => { window._applyUploads[d.key] = []; });
+
+  container.innerHTML = `
+    <div class="max-w-md mx-auto">
+      <div class="text-center mb-6">
+        <div class="w-14 h-14 bg-blue-700 rounded-xl mx-auto flex items-center justify-center text-white font-bold text-lg mb-3">G&amp;P</div>
+        <h1 class="text-xl font-bold text-slate-900">G &amp; P Finance</h1>
+        <p class="text-sm text-slate-500 mt-1">Online Loan Application</p>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+        <div class="text-sm text-slate-600">Complete the form below and upload clear photos of your documents. We will review your application and contact you on WhatsApp.</div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4 space-y-4">
+        <h2 class="font-semibold text-slate-900">Your Details</h2>
+        <div>
+          <label>Full Name (as on ID) <span class="text-red-600">*</span></label>
+          <input type="text" id="app-fullName" placeholder="e.g. Johannes Shikongo" autocomplete="name">
+        </div>
+        <div>
+          <label>Namibian ID Number <span class="text-red-600">*</span></label>
+          <input type="text" id="app-idNumber" inputmode="numeric" placeholder="11 digits" maxlength="13">
+        </div>
+        <div>
+          <label>Mobile Number (WhatsApp) <span class="text-red-600">*</span></label>
+          <input type="tel" id="app-phone" inputmode="tel" placeholder="e.g. 081 234 5678" autocomplete="tel">
+          <div class="text-xs text-slate-500 mt-1">We will contact you on this WhatsApp number.</div>
+        </div>
+        <div>
+          <label>Loan Amount Requested (N$)</label>
+          <input type="number" id="app-amount" inputmode="decimal" min="0" step="0.01" placeholder="Optional">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+        <h2 class="font-semibold text-slate-900 mb-1">Your Documents</h2>
+        <div class="text-xs text-slate-500 mb-4">All documents are required. Max 10MB per photo.</div>
+        <div id="apply-docs" class="space-y-3"></div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="app-consent" onchange="updateApplySubmitState()" style="margin-top:3px; width:18px; height:18px;">
+          <span class="text-xs text-slate-600">I confirm the information provided is true and correct, and I consent to G &amp; P Finance processing my personal information and documents for the purpose of assessing this loan application, in line with applicable Namibian law.</span>
+        </label>
+      </div>
+
+      <button id="apply-submit-btn" onclick="submitApplication()" class="btn-primary w-full" disabled>Submit Application</button>
+      <div id="apply-hint" class="text-center text-xs text-slate-500 mt-3">Fill in all fields and add all documents to submit.</div>
+
+      <div class="text-center text-xs text-slate-500 mt-6 mb-4">
+        Your documents are stored securely and are only visible to G &amp; P Finance staff.
+      </div>
+    </div>
+  `;
+
+  const docsEl = document.getElementById('apply-docs');
+  docsEl.innerHTML = APPLY_DOC_TYPES.map(d => `
+    <div class="bg-slate-50 rounded-xl border border-slate-200 p-4">
+      <div class="font-medium text-slate-900">${d.label} <span class="text-red-600">*</span></div>
+      <div class="text-xs text-slate-500 mt-1 mb-3">${d.help}</div>
+      <div id="apply-preview-${d.key}" class="mb-2"></div>
+      <label class="inline-block">
+        <input type="file" id="apply-doc-${d.key}" accept="${d.accept}" ${d.capture ? `capture="${d.capture}"` : ''} ${d.multiple ? 'multiple' : ''} onchange="handleApplyFile(this, '${d.key}', ${d.multiple})" class="hidden">
+        <span id="apply-btn-${d.key}" class="btn-secondary text-sm cursor-pointer inline-flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3" stroke-width="2"/></svg>
+          ${d.multiple ? 'Add pages' : 'Take / choose photo'}
+        </span>
+      </label>
+    </div>
+  `).join('');
+  ['app-fullName','app-idNumber','app-phone'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateApplySubmitState);
+  });
+}
+
+function handleApplyFile(input, key, multiple) {
+  const files = Array.from(input.files || []);
+  input.value = ''; // allow re-selecting / adding more later
+  if (files.length === 0) return;
+  for (const f of files) {
+    if (f.size > 10 * 1024 * 1024) { alert(`File "${f.name}" is too large. Maximum 10MB per file.`); return; }
+  }
+  if (multiple) {
+    const existing = window._applyUploads[key] || [];
+    if (existing.length + files.length > 60) { alert('Maximum 60 pages per document.'); return; }
+    window._applyUploads[key] = existing.concat(files);
+  } else {
+    window._applyUploads[key] = [files[0]];
+  }
+  renderApplyPreview(key, multiple);
+  updateApplySubmitState();
+}
+
+function removeApplyFile(key, index, multiple) {
+  (window._applyUploads[key] || []).splice(index, 1);
+  renderApplyPreview(key, multiple);
+  updateApplySubmitState();
+}
+
+function renderApplyPreview(key, multiple) {
+  const files = window._applyUploads[key] || [];
+  const el = document.getElementById(`apply-preview-${key}`);
+  const btn = document.getElementById(`apply-btn-${key}`);
+  if (!el) return;
+  if (files.length === 0) { el.innerHTML = ''; return; }
+  if (multiple && btn) btn.lastChild.textContent = ' Add more pages';
+  const items = files.map((f, i) => {
+    const removeBtn = `<button onclick="removeApplyFile('${key}', ${i}, ${multiple})" style="position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:9999px; background:#dc2626; color:#fff; font-size:12px; line-height:22px; text-align:center;">✕</button>`;
+    if (f.type.startsWith('image/')) {
+      const url = URL.createObjectURL(f);
+      return `<div style="position:relative;">
+        <img src="${url}" style="width:100%; height:80px; object-fit:cover; border-radius:8px; border:1px solid #e2e8f0;">
+        ${multiple ? `<div style="position:absolute; bottom:2px; left:4px; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; padding:1px 5px; border-radius:4px;">Pg ${i + 1}</div>` : ''}
+        ${removeBtn}
+      </div>`;
+    }
+    return `<div style="position:relative;" class="bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-700 truncate">📄 ${escapeHtml(f.name)}${removeBtn}</div>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">${items}</div>
+    <div class="text-xs text-green-700 mt-2">✓ ${files.length} ${multiple ? 'page(s) added' : 'photo added'}</div>
+  `;
+}
+
+function updateApplySubmitState() {
+  const btn = document.getElementById('apply-submit-btn');
+  const hint = document.getElementById('apply-hint');
+  if (!btn) return;
+  const name = (document.getElementById('app-fullName')?.value || '').trim();
+  const idNum = (document.getElementById('app-idNumber')?.value || '').trim();
+  const phone = (document.getElementById('app-phone')?.value || '').trim();
+  const consent = document.getElementById('app-consent')?.checked;
+  const missingDocs = APPLY_DOC_TYPES.filter(d => !(window._applyUploads[d.key] || []).length).map(d => d.label);
+  const problems = [];
+  if (!name) problems.push('full name');
+  if (!idNum) problems.push('ID number');
+  if (!phone) problems.push('WhatsApp number');
+  if (missingDocs.length) problems.push(missingDocs.join(', '));
+  if (!consent) problems.push('consent tick');
+  btn.disabled = problems.length > 0;
+  if (hint) hint.textContent = problems.length ? 'Still needed: ' + problems.join('; ') : 'Ready to submit ✓';
+}
+
+async function submitApplication() {
+  const btn = document.getElementById('apply-submit-btn');
+  const name = document.getElementById('app-fullName').value.trim();
+  const idNum = document.getElementById('app-idNumber').value.trim().replace(/\s/g, '');
+  const phoneRaw = document.getElementById('app-phone').value.trim();
+  const amount = parseFloat(document.getElementById('app-amount').value) || null;
+  const phoneDigits = phoneRaw.replace(/[^0-9]/g, '');
+  if (!/^\d{9,13}$/.test(idNum)) { alert('Please check your ID number — it should be the digits on your Namibian ID.'); return; }
+  if (phoneDigits.length < 9) { alert('Please check your mobile number — it looks too short.'); return; }
+
+  btn.disabled = true;
+  const appId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }));
+  const record = {
+    id: appId,
+    full_name: name,
+    id_number: idNum,
+    phone: phoneRaw,
+    amount_requested: amount,
+    status: 'Pending',
+    document_pages: {}
+  };
+  const urlMap = { selfie: 'selfie_url', id_front: 'id_front_url', id_back: 'id_back_url', income_document: 'income_document_url', bank_statement: 'bank_statement_url' };
+  const totalFiles = APPLY_DOC_TYPES.reduce((s, d) => s + (window._applyUploads[d.key] || []).length, 0);
+  let done = 0;
+
+  try {
+    for (const d of APPLY_DOC_TYPES) {
+      const files = window._applyUploads[d.key] || [];
+      const uploadedUrls = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        btn.textContent = `Uploading ${done + 1} of ${totalFiles}...`;
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+        const path = `applications/${appId}/${d.key}_${Date.now()}_${i}.${ext}`;
+        const { error: upErr } = await db.storage.from('kyc-documents').upload(path, file, { contentType: file.type, upsert: true });
+        if (upErr) throw new Error(`Failed to upload ${d.label}: ${upErr.message}`);
+        const { data: urlData } = db.storage.from('kyc-documents').getPublicUrl(path);
+        uploadedUrls.push(urlData.publicUrl);
+        done++;
+      }
+      if (uploadedUrls.length > 0) {
+        record[urlMap[d.key]] = uploadedUrls[0];
+        if (uploadedUrls.length > 1) record.document_pages[d.key] = uploadedUrls.slice(1);
+      }
+    }
+
+    btn.textContent = 'Submitting...';
+    const { error: insErr } = await db.from('loan_applications').insert(record);
+    if (insErr) throw new Error('Could not submit application: ' + insErr.message);
+
+    // Notify staff (in-app bell + push)
+    try {
+      const msg = `ID ${idNum} · ${phoneRaw}` + (amount ? ` · Requested ${fmt(amount)}` : '');
+      await db.rpc('create_broadcast_notification', {
+        p_event_type: 'application_submitted',
+        p_title: `${name} submitted a loan application`,
+        p_message: msg,
+        p_client_id: null,
+        p_loan_id: null
+      });
+      await dispatchPush({
+        event_type: 'application_submitted',
+        title: `${name} submitted a loan application`,
+        message: msg
+      });
+    } catch (e) { console.warn('Notification create failed:', e); }
+
+    document.getElementById('public-container').innerHTML = `
+      <div class="max-w-md mx-auto text-center py-12">
+        <div class="w-16 h-16 bg-green-100 rounded-full mx-auto flex items-center justify-center mb-4">
+          <svg class="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        </div>
+        <h1 class="text-xl font-bold text-slate-900">Application Received</h1>
+        <p class="text-sm text-slate-600 mt-2">Thank you, ${escapeHtml(name)}.</p>
+        <p class="text-sm text-slate-600 mt-1">Your reference number is <strong>APP-${appId.substring(0, 8).toUpperCase()}</strong>.</p>
+        <p class="text-sm text-slate-600 mt-1">G &amp; P Finance will review your application and contact you on WhatsApp.</p>
+      </div>
+    `;
+  } catch (e) {
+    alert(e.message);
+    btn.disabled = false;
+    btn.textContent = 'Submit Application';
+  }
+}
+
+// -----------------------------------------------------
+// ADMIN: APPLICATIONS VIEW
+// -----------------------------------------------------
+function applyPageUrl() {
+  return window.location.origin + window.location.pathname + '?apply=1';
+}
+
+function copyApplyLink() {
+  navigator.clipboard.writeText(applyPageUrl()).then(() => showAlert('Application link copied. Share it with clients via WhatsApp, SMS or social media.', 'Link Copied'));
+}
+
+function shareApplyLinkWhatsApp() {
+  const message = `Apply for a loan with G & P Finance online — complete the form and upload your documents here:\n${applyPageUrl()}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+}
+
+function renderApplications() {
+  const apps = state.applications || [];
+  const tab = state.currentApplicationsTab || 'Pending';
+  const counts = {
+    Pending: apps.filter(a => a.status === 'Pending').length,
+    Approved: apps.filter(a => a.status === 'Approved').length,
+    Rejected: apps.filter(a => a.status === 'Rejected').length
+  };
+  const filtered = tab === 'All' ? apps : apps.filter(a => a.status === tab);
+  const statusBadge = (s) => {
+    const cls = s === 'Pending' ? 'bg-amber-100 text-amber-800' : s === 'Approved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+    return `<span class="text-xs font-medium px-2 py-0.5 rounded-full ${cls}">${s}</span>`;
+  };
+  const tabBtn = (t, label) => `
+    <button onclick="state.currentApplicationsTab='${t}'; render();" class="px-4 py-2 text-sm font-medium rounded-lg ${tab === t ? 'bg-blue-700 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">${label}</button>
+  `;
+  return `
+    <div class="space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-slate-900">Loan Applications</h1>
+          <p class="text-sm text-slate-500 mt-1">Online applications submitted by clients</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="copyApplyLink()" class="btn-secondary text-sm">Copy Application Link</button>
+          <button onclick="shareApplyLinkWhatsApp()" class="btn-primary text-sm">Share via WhatsApp</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Pending</div><div class="text-2xl font-bold text-amber-700 mt-1">${counts.Pending}</div></div>
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Approved</div><div class="text-2xl font-bold text-green-700 mt-1">${counts.Approved}</div></div>
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Rejected</div><div class="text-2xl font-bold text-red-700 mt-1">${counts.Rejected}</div></div>
+      </div>
+
+      <div class="flex gap-2 flex-wrap">
+        ${tabBtn('Pending', `Pending${counts.Pending ? ` (${counts.Pending})` : ''}`)}
+        ${tabBtn('Approved', 'Approved')}
+        ${tabBtn('Rejected', 'Rejected')}
+        ${tabBtn('All', 'All')}
+      </div>
+
+      <div class="card overflow-hidden">
+        ${filtered.length === 0 ? `
+          <div class="p-10 text-center text-sm text-slate-500">
+            ${tab === 'Pending' ? 'No pending applications. Share the application link with clients to receive applications here.' : `No ${tab.toLowerCase()} applications.`}
+          </div>
+        ` : `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
+              <th class="px-4 py-3">Date</th><th class="px-4 py-3">Ref</th><th class="px-4 py-3">Applicant</th><th class="px-4 py-3">ID Number</th><th class="px-4 py-3">WhatsApp</th><th class="px-4 py-3">Requested</th><th class="px-4 py-3">Status</th><th class="px-4 py-3"></th>
+            </tr></thead>
+            <tbody>
+              ${filtered.map(a => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                  <td class="px-4 py-3 whitespace-nowrap">${fmtDate(a.submittedAt)}</td>
+                  <td class="px-4 py-3 font-mono text-xs">${applicationRef(a)}</td>
+                  <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(a.fullName)}</td>
+                  <td class="px-4 py-3 font-mono text-xs">${escapeHtml(a.idNumber)}</td>
+                  <td class="px-4 py-3">${escapeHtml(a.phone)}</td>
+                  <td class="px-4 py-3">${a.amountRequested ? fmt(a.amountRequested) : '—'}</td>
+                  <td class="px-4 py-3">${statusBadge(a.status)}</td>
+                  <td class="px-4 py-3 text-right"><button onclick="openApplicationReview('${a.id}')" class="btn-secondary text-xs">Review</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>
+    </div>
+  `;
+}
+
+function applicationDocGallery(app) {
+  const pages = app.documentPages || {};
+  const urlMap = { selfie: app.selfieUrl, id_front: app.idFrontUrl, id_back: app.idBackUrl, income_document: app.incomeDocumentUrl, bank_statement: app.bankStatementUrl };
+  return APPLY_DOC_TYPES.map(d => {
+    const all = [urlMap[d.key], ...(pages[d.key] || [])].filter(u => u);
+    if (all.length === 0) return `<div class="text-xs text-red-700">✗ ${d.label}: missing</div>`;
+    const thumbs = all.map((u, i) => {
+      const isPdf = /\.pdf(\?|$)/i.test(u);
+      return `<a href="${u}" target="_blank" rel="noopener" style="display:block; position:relative;">
+        ${isPdf
+          ? `<div class="bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center" style="height:90px; font-size:24px;">📄</div>`
+          : `<img src="${u}" loading="lazy" style="width:100%; height:90px; object-fit:cover; border-radius:8px; border:1px solid #e2e8f0;">`}
+        ${all.length > 1 ? `<div style="position:absolute; bottom:2px; left:4px; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; padding:1px 5px; border-radius:4px;">Pg ${i + 1}</div>` : ''}
+      </a>`;
+    }).join('');
+    return `
+      <div>
+        <div class="text-xs font-medium text-slate-700 mb-1">${d.label} <span class="text-slate-400">(${all.length} page${all.length > 1 ? 's' : ''} — click to open)</span></div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;">${thumbs}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openApplicationReview(appId) {
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  const reviewer = app.reviewedBy ? (state.users.find(u => u.id === app.reviewedBy)?.fullName || 'Staff') : null;
+  const linkedClient = app.clientId ? state.clients.find(c => c.id === app.clientId) : null;
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center sticky top-0 bg-white rounded-t-xl">
+          <h2 class="font-semibold text-lg">Application ${applicationRef(app)}</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-5">
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div><div class="text-xs text-slate-500 uppercase">Applicant</div><div class="font-medium mt-1">${escapeHtml(app.fullName)}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">ID Number</div><div class="font-medium mt-1 font-mono">${escapeHtml(app.idNumber)}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">WhatsApp</div><div class="font-medium mt-1">${escapeHtml(app.phone)}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Requested</div><div class="font-medium mt-1">${app.amountRequested ? fmt(app.amountRequested) : '—'}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Submitted</div><div class="font-medium mt-1">${fmtDate(app.submittedAt)}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Status</div><div class="font-medium mt-1">${escapeHtml(app.status)}</div></div>
+          </div>
+
+          ${app.status === 'Rejected' ? `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-900">
+              <strong>Rejected${reviewer ? ' by ' + escapeHtml(reviewer) : ''}${app.reviewedAt ? ' on ' + fmtDate(app.reviewedAt) : ''}.</strong>
+              <div class="mt-1">Reason: ${escapeHtml(app.rejectionReason || '—')}</div>
+            </div>` : ''}
+          ${app.status === 'Approved' ? `
+            <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-900">
+              <strong>Approved${reviewer ? ' by ' + escapeHtml(reviewer) : ''}${app.reviewedAt ? ' on ' + fmtDate(app.reviewedAt) : ''}.</strong>
+              ${linkedClient ? `<div class="mt-1">Client record: <button onclick="closeModal(); openClientDetail('${linkedClient.id}')" class="underline font-medium">${escapeHtml(linkedClient.fullName)}</button></div>` : ''}
+            </div>` : ''}
+
+          <div class="space-y-4">
+            <h3 class="font-semibold text-slate-900">Documents</h3>
+            ${applicationDocGallery(app)}
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex flex-wrap justify-end gap-2 sticky bottom-0 bg-white rounded-b-xl">
+          ${app.status === 'Pending' ? `
+            <button onclick="openRejectApplication('${app.id}')" class="btn-secondary text-red-700">Reject...</button>
+            <button onclick="approveApplication('${app.id}')" class="btn-primary bg-green-700 hover:bg-green-800">Approve &amp; Create Client</button>
+          ` : ''}
+          ${app.status === 'Rejected' ? `
+            <button onclick="deleteApplication('${app.id}')" class="btn-secondary text-red-700">Delete</button>
+            <button onclick="notifyApplicantRejection('${app.id}')" class="btn-primary">Notify via WhatsApp</button>
+          ` : ''}
+          ${app.status === 'Approved' && linkedClient ? `
+            <button onclick="closeModal(); openLoanForm(null, '${linkedClient.id}')" class="btn-primary">Issue Loan</button>
+          ` : ''}
+          <button onclick="closeModal()" class="btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function approveApplication(appId) {
+  if (!requirePerm('create', 'clients')) return;
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app || app.status !== 'Pending') return;
+
+  // Guard against duplicate client records
+  const existing = state.clients.find(c => (c.idNumber || '').trim() === (app.idNumber || '').trim());
+  const finalize = async (clientId, createdNew) => {
+    const { error } = await db.from('loan_applications').update({
+      status: 'Approved',
+      client_id: clientId,
+      reviewed_by: state.currentUser?.id || null,
+      reviewed_at: new Date().toISOString()
+    }).eq('id', appId);
+    if (error) { showAlert('Could not update application: ' + error.message); return; }
+    await logAudit('approve', 'application', appId, { applicant: app.fullName, clientId, createdNew });
+    try {
+      await db.rpc('create_broadcast_notification', {
+        p_event_type: 'application_approved',
+        p_title: `Application from ${app.fullName} approved`,
+        p_message: createdNew ? 'New client created from application' : 'Application linked to existing client',
+        p_client_id: clientId,
+        p_loan_id: null
+      });
+    } catch (e) { console.warn('Notification create failed:', e); }
+    await saveTable('applications');
+    await saveTable('clients');
+    render();
+    buildNav();
+    confirmAction(
+      `Application approved and client record ${createdNew ? 'created' : 'linked'} for ${app.fullName}.\n\nProceed to issue a loan now?`,
+      () => openLoanForm(null, clientId),
+      'Issue Loan Now',
+      'bg-green-700 hover:bg-green-800'
+    );
+  };
+
+  if (existing) {
+    confirmAction(
+      `A client with ID ${app.idNumber} already exists: ${existing.fullName}.\n\nApprove and link this application to the existing client? (The existing client's documents will not be changed — the application documents remain viewable here.)`,
+      () => finalize(existing.id, false),
+      'Link to Existing Client',
+      'bg-green-700 hover:bg-green-800'
+    );
+    return;
+  }
+
+  confirmAction(
+    `Approve this application and create a new client record for ${app.fullName}?\n\nThe uploaded documents will be attached to the client's KYC file.`,
+    async () => {
+      const pages = app.documentPages || {};
+      const sources = {};
+      ['selfie', 'id_front', 'id_back', 'income_document', 'bank_statement'].forEach(k => { sources[k] = 'client'; });
+      const record = {
+        full_name: app.fullName,
+        id_number: app.idNumber,
+        phone: app.phone,
+        status: 'Active',
+        registration_date: today(),
+        created_by: state.currentUser?.id || null,
+        selfie_url: app.selfieUrl || null,
+        id_front_url: app.idFrontUrl || null,
+        id_back_url: app.idBackUrl || null,
+        income_document_url: app.incomeDocumentUrl || null,
+        bank_statement_url: app.bankStatementUrl || null,
+        document_pages: pages,
+        document_sources: sources,
+        document_reviews: {},
+        documents_uploaded_at: app.submittedAt || new Date().toISOString()
+      };
+      record.kyc_status = computeKycStatus(snakeToCamel(record));
+      const { data, error } = await db.from('clients').insert(record).select().single();
+      if (error) { showAlert('Could not create client: ' + error.message); return; }
+      await logAudit('create', 'client', data.id, { fullName: app.fullName, idNumber: app.idNumber, phone: app.phone, source: 'online_application' });
+      await finalize(data.id, true);
+    },
+    'Approve & Create Client',
+    'bg-green-700 hover:bg-green-800'
+  );
+}
+
+function openRejectApplication(appId) {
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  const quickReasons = [
+    'Affordability — income does not support the requested loan',
+    'Bank statement incomplete — full 3 months required',
+    'Documents unclear or unreadable — please re-take photos',
+    'ID details could not be verified',
+    'Existing loan in arrears must be settled first'
+  ];
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-lg">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Reject Application</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="text-sm text-slate-600">Rejecting application <strong>${applicationRef(app)}</strong> from <strong>${escapeHtml(app.fullName)}</strong>. The reason below is saved on record and included in the WhatsApp message to the applicant.</div>
+          <div>
+            <label>Reason for rejection *</label>
+            <textarea id="reject-reason" rows="3" placeholder="Type a reason or pick one below"></textarea>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            ${quickReasons.map(r => `<button onclick="document.getElementById('reject-reason').value=${JSON.stringify(r).replace(/"/g, '&quot;')}" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full px-3 py-1.5 text-left">${escapeHtml(r)}</button>`).join('')}
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="openApplicationReview('${app.id}')" class="btn-secondary">Back</button>
+          <button onclick="confirmRejectApplication('${app.id}')" class="btn-primary bg-red-600 hover:bg-red-700">Reject Application</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmRejectApplication(appId) {
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  const reason = (document.getElementById('reject-reason')?.value || '').trim();
+  if (!reason) { showAlert('Please enter a reason for the rejection.'); return; }
+  const { error } = await db.from('loan_applications').update({
+    status: 'Rejected',
+    rejection_reason: reason,
+    reviewed_by: state.currentUser?.id || null,
+    reviewed_at: new Date().toISOString()
+  }).eq('id', appId);
+  if (error) { showAlert('Could not reject application: ' + error.message); return; }
+  await logAudit('reject', 'application', appId, { applicant: app.fullName, reason });
+  await saveTable('applications');
+  render();
+  buildNav();
+  app.status = 'Rejected';
+  app.rejectionReason = reason;
+  notifyApplicantRejection(appId);
+}
+
+function notifyApplicantRejection(appId) {
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  const firstName = (app.fullName || '').split(' ')[0];
+  const message =
+    `Dear ${firstName},\n\n` +
+    `Thank you for your loan application to G & P Finance (Ref: ${applicationRef(app)}).\n\n` +
+    `After careful review, we regret to inform you that your application was not successful at this time.\n\n` +
+    `Reason: ${app.rejectionReason || 'Requirements not met'}\n\n` +
+    `You are welcome to contact us for more information, or to apply again once the above has been addressed.\n\n` +
+    `Kind regards,\nG & P Finance`;
+  closeModal();
+  openWhatsApp(app.phone, message);
+}
+
+function deleteApplication(appId) {
+  if (state.currentUser?.role !== 'Administrator') { showAlert('Only Administrators can delete applications.'); return; }
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  confirmAction(`Delete application ${applicationRef(app)} from ${app.fullName}?\n\nThis cannot be undone.`, async () => {
+    const { error } = await db.from('loan_applications').delete().eq('id', appId);
+    if (error) { showAlert('Delete failed: ' + error.message); return; }
+    await logAudit('delete', 'application', appId, { snapshot: { fullName: app.fullName, idNumber: app.idNumber } });
+    await saveTable('applications');
+    closeModal();
+    render();
+    buildNav();
+  });
+}
+
 
 // =====================================================
 // INIT
