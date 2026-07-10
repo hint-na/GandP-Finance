@@ -1,5 +1,5 @@
-// G & P Finance Service Worker v11 (dashboard cash-at-bank card)
-const CACHE_NAME = 'gp-finance-v11';
+// G & P Finance Service Worker v12 (in-app user management)
+const CACHE_NAME = 'gp-finance-v12';
 const APP_SHELL = [
   './manifest.json',
   'https://cdn.tailwindcss.com',

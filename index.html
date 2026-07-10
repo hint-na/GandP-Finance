@@ -2088,32 +2088,36 @@ function reportOfficer() {
 // USERS
 // =====================================================
 function renderUsers() {
+  const isAdmin = state.currentUser?.role === 'Administrator';
   return `
-    <div class="mb-8">
-      <h1 class="text-2xl font-bold text-slate-900">Users</h1>
-      <p class="text-slate-500 text-sm mt-1">${state.users.length} user account(s) · Managed via Supabase</p>
+    <div class="mb-8 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Users</h1>
+        <p class="text-slate-500 text-sm mt-1">${state.users.length} user account(s)</p>
+      </div>
+      ${isAdmin ? `<button onclick="openUserForm()" class="btn-primary">+ Add User</button>` : ''}
     </div>
     <div class="card overflow-hidden">
       <table>
-        <thead><tr><th>Full Name</th><th>Role</th><th>Status</th></tr></thead>
+        <thead><tr><th>Full Name</th><th>Role</th><th>Status</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
         <tbody>
           ${state.users.map(u => `<tr>
-            <td class="font-medium">${escapeHtml(u.fullName)}</td>
+            <td class="font-medium">${escapeHtml(u.fullName)}${u.id === state.currentUser?.id ? ' <span class="text-xs text-slate-400">(you)</span>' : ''}</td>
             <td><span class="badge badge-${u.role.toLowerCase().replace(' ','')}">${escapeHtml(u.role)}</span></td>
             <td><span class="badge badge-${u.active ? 'active' : 'inactive'}">${u.active ? 'Active' : 'Inactive'}</span></td>
+            ${isAdmin ? `<td class="text-right whitespace-nowrap">
+              <button onclick="openResetPassword('${u.id}')" class="btn-secondary text-xs">Reset Password</button>
+              ${u.id !== state.currentUser?.id ? `<button onclick="toggleUserActive('${u.id}', ${u.active ? 'false' : 'true'})" class="text-xs ${u.active ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-green-700 hover:bg-green-50'} px-2 py-1.5 rounded font-medium">${u.active ? 'Deactivate' : 'Activate'}</button>` : ''}
+            </td>` : ''}
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
+    ${isAdmin ? `
     <div class="mt-6 card p-4 bg-blue-50 border-blue-200">
-      <h3 class="font-semibold text-sm mb-2 text-blue-900">Managing Users</h3>
-      <p class="text-xs text-blue-900">User accounts are managed via the Supabase dashboard for security. To add, remove, or reset passwords for users:</p>
-      <ol class="text-xs text-blue-900 mt-2 ml-4 list-decimal space-y-1">
-        <li>Log in to <strong>db.com</strong> as the project owner</li>
-        <li>Navigate to <strong>Authentication → Users</strong> to add/remove users</li>
-        <li>Use the SQL Editor to update the <code class="bg-white px-1 rounded">profiles</code> table to change a user's role or activate/deactivate</li>
-      </ol>
-    </div>
+      <h3 class="font-semibold text-sm mb-2 text-blue-900">How adding a user works</h3>
+      <p class="text-xs text-blue-900">Tap <strong>+ Add User</strong>, enter their name, email, role, and a temporary password. Give them the email and password privately (e.g. in person or a WhatsApp message you later delete) — they sign in at the app with it. Deactivating a user blocks their login immediately without deleting their history.</p>
+    </div>` : ''}
     <div class="mt-6 card p-4 bg-slate-50">
       <h3 class="font-semibold text-sm mb-3">Role Permissions</h3>
       <div class="grid grid-cols-4 gap-4 text-xs">
@@ -2126,9 +2130,153 @@ function renderUsers() {
   `;
 }
 
-function openUserForm() { showAlert('User accounts are managed via the Supabase dashboard. See instructions on the Users page.', 'Info'); }
-function saveUser() {}
-function deleteUser() { showAlert('User accounts are managed via the Supabase dashboard.', 'Info'); }
+const MANAGE_USERS_FN_URL = SUPABASE_URL + '/functions/v1/manage-users';
+
+async function callManageUsers(payload) {
+  const { data: sessionData } = await db.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  const resp = await fetch(MANAGE_USERS_FN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': SUPABASE_KEY },
+    body: JSON.stringify(payload)
+  });
+  const out = await resp.json();
+  if (!resp.ok) throw new Error(out.error || 'Request failed');
+  return out;
+}
+
+function generateTempPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let p = '';
+  for (let i = 0; i < 10; i++) p += chars[Math.floor(Math.random() * chars.length)];
+  return p;
+}
+
+function openUserForm() {
+  if (state.currentUser?.role !== 'Administrator') { showAlert('Only Administrators can add users.', 'Permission Denied'); return; }
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Add User</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div><label>Full Name *</label><input type="text" id="u-fullName" placeholder="e.g. Maria Amukoto"></div>
+          <div><label>Email (their login) *</label><input type="email" id="u-email" placeholder="e.g. maria@gmail.com"></div>
+          <div><label>Role *</label>
+            <select id="u-role">
+              <option value="Loan Officer">Loan Officer — create/edit clients, loans, payments</option>
+              <option value="Cashier">Cashier — record payments, view only</option>
+              <option value="Auditor">Auditor — read-only access</option>
+              <option value="Administrator">Administrator — full access</option>
+            </select>
+          </div>
+          <div><label>Temporary Password * (min 8 characters)</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="u-password" value="${generateTempPassword()}" autocomplete="off">
+              <button onclick="document.getElementById('u-password').value = generateTempPassword()" class="btn-secondary text-sm whitespace-nowrap">Generate</button>
+            </div>
+            <div class="text-xs text-slate-500 mt-1">Share this with them privately. They sign in with the email and this password.</div>
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button id="u-save-btn" onclick="saveUser()" class="btn-primary">Create User</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveUser() {
+  const fullName = document.getElementById('u-fullName').value.trim();
+  const email = document.getElementById('u-email').value.trim();
+  const role = document.getElementById('u-role').value;
+  const password = document.getElementById('u-password').value;
+  if (!fullName || !email || !role) { showAlert('Full name, email and role are required.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showAlert('Please enter a valid email address.'); return; }
+  if (!password || password.length < 8) { showAlert('Password must be at least 8 characters.'); return; }
+  const btn = document.getElementById('u-save-btn');
+  btn.disabled = true; btn.textContent = 'Creating...';
+  try {
+    const result = await callManageUsers({ action: 'create', full_name: fullName, email, role, password });
+    await logAudit('create', 'user', result.user_id, { fullName, role });
+    await saveTable('users');
+    closeModal();
+    render();
+    showAlert(`User created.\n\nLogin email: ${email}\nTemporary password: ${password}\n\nShare these with ${fullName.split(' ')[0]} privately, then delete the message.`, 'User Created');
+  } catch (e) {
+    showAlert('Could not create user: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Create User';
+  }
+}
+
+function toggleUserActive(userId, active) {
+  const u = state.users.find(x => x.id === userId);
+  if (!u) return;
+  confirmAction(
+    active
+      ? `Reactivate ${u.fullName}? They will be able to sign in again.`
+      : `Deactivate ${u.fullName}?\n\nThey will be blocked from signing in immediately. Their history and records remain intact.`,
+    async () => {
+      try {
+        await callManageUsers({ action: 'set_active', user_id: userId, active });
+        await logAudit(active ? 'activate' : 'deactivate', 'user', userId, { fullName: u.fullName });
+        await saveTable('users');
+        closeModal();
+        render();
+      } catch (e) { showAlert('Could not update user: ' + e.message); }
+    },
+    active ? 'Activate' : 'Deactivate',
+    active ? 'bg-green-700 hover:bg-green-800' : undefined
+  );
+}
+
+function openResetPassword(userId) {
+  const u = state.users.find(x => x.id === userId);
+  if (!u) return;
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Reset Password — ${escapeHtml(u.fullName)}</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div><label>New Password * (min 8 characters)</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="rp-password" value="${generateTempPassword()}" autocomplete="off">
+              <button onclick="document.getElementById('rp-password').value = generateTempPassword()" class="btn-secondary text-sm whitespace-nowrap">Generate</button>
+            </div>
+            <div class="text-xs text-slate-500 mt-1">Their old password stops working immediately. Share the new one privately.</div>
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button id="rp-save-btn" onclick="confirmResetPassword('${userId}')" class="btn-primary">Reset Password</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmResetPassword(userId) {
+  const u = state.users.find(x => x.id === userId);
+  const password = document.getElementById('rp-password').value;
+  if (!password || password.length < 8) { showAlert('Password must be at least 8 characters.'); return; }
+  const btn = document.getElementById('rp-save-btn');
+  btn.disabled = true; btn.textContent = 'Resetting...';
+  try {
+    await callManageUsers({ action: 'reset_password', user_id: userId, password });
+    await logAudit('update', 'user', userId, { fullName: u?.fullName, change: 'password_reset' });
+    closeModal();
+    showAlert(`Password reset for ${u?.fullName}.\n\nNew password: ${password}\n\nShare it privately, then delete the message.`, 'Password Reset');
+  } catch (e) {
+    showAlert('Could not reset password: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Reset Password';
+  }
+}
 
 
 // =====================================================
