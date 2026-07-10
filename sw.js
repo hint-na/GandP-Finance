@@ -1,5 +1,5 @@
-// G & P Finance Service Worker v9 (capital position report)
-const CACHE_NAME = 'gp-finance-v9';
+// G & P Finance Service Worker v10 (shared capital + bank reconciliation)
+const CACHE_NAME = 'gp-finance-v10';
 const APP_SHELL = [
   './manifest.json',
   'https://cdn.tailwindcss.com',

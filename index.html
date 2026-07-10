@@ -327,7 +327,7 @@ function clientRefById(clientId) {
 // =====================================================
 async function loadData() {
   try {
-    const [clientsRes, loansRes, paymentsRes, productsRes, settingsRes, auditRes, profilesRes, linksRes, applicationsRes, capitalRes] = await Promise.all([
+    const [clientsRes, loansRes, paymentsRes, productsRes, settingsRes, auditRes, profilesRes, linksRes, applicationsRes, capitalRes, bankStRes, bankTxRes] = await Promise.all([
       db.from('clients').select('*').order('registration_date', {ascending: false}),
       db.from('loans').select('*').order('disbursement_date', {ascending: false}),
       db.from('payments').select('*').order('payment_date', {ascending: false}),
@@ -337,7 +337,9 @@ async function loadData() {
       db.from('profiles').select('*'),
       db.from('client_links').select('*').order('created_at', {ascending: false}),
       db.from('loan_applications').select('*').order('submitted_at', {ascending: false}),
-      db.from('capital_investments').select('*').order('invested_on', {ascending: false})
+      db.from('capital_investments').select('*').order('invested_on', {ascending: false}),
+      db.from('bank_statements').select('*').order('created_at', {ascending: false}),
+      db.from('bank_transactions').select('*').order('tx_date', {ascending: false})
     ]);
     state.clients = (clientsRes.data || []).map(snakeToCamel);
     state.loans = (loansRes.data || []).map(snakeToCamel);
@@ -349,6 +351,8 @@ async function loadData() {
     state.clientLinks = (linksRes.data || []).map(snakeToCamel);
     state.applications = (applicationsRes.data || []).map(snakeToCamel);
     state.capital = (capitalRes.data || []).map(snakeToCamel);
+    state.bankStatements = (bankStRes.data || []).map(snakeToCamel);
+    state.bankTx = (bankTxRes.data || []).map(snakeToCamel);
     // Normalize field names
     if (state.settings.penaltyConfig) state.settings.penalty = state.settings.penaltyConfig;
     if (!state.settings.penalty) state.settings.penalty = { enabled: false, type: 'percentage', amount: 5, basis: 'instalment', frequency: 'monthly', gracePeriodDays: 3, maxPenaltyPercent: 100 };
@@ -379,10 +383,10 @@ async function saveSettings() {
 
 async function saveTable(name) {
   // Reload from Supabase to sync state
-  const tableMap = { clients: 'clients', loans: 'loans', payments: 'payments', products: 'products', audit: 'audit', users: 'profiles', clientLinks: 'client_links', applications: 'loan_applications', capital: 'capital_investments' };
+  const tableMap = { clients: 'clients', loans: 'loans', payments: 'payments', products: 'products', audit: 'audit', users: 'profiles', clientLinks: 'client_links', applications: 'loan_applications', capital: 'capital_investments', bankStatements: 'bank_statements', bankTx: 'bank_transactions' };
   const table = tableMap[name];
   if (!table) return;
-  const orderMap = { clients: 'registration_date', loans: 'disbursement_date', payments: 'payment_date', audit: 'timestamp', clientLinks: 'created_at', applications: 'submitted_at', capital: 'invested_on' };
+  const orderMap = { clients: 'registration_date', loans: 'disbursement_date', payments: 'payment_date', audit: 'timestamp', clientLinks: 'created_at', applications: 'submitted_at', capital: 'invested_on', bankStatements: 'created_at', bankTx: 'tx_date' };
   let q = db.from(table).select('*');
   if (orderMap[name]) q = q.order(orderMap[name], { ascending: false });
   if (name === 'audit') q = q.limit(500);
@@ -746,7 +750,8 @@ function buildNav() {
     { id: 'reports', label: 'Reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', show: can('read','reports') },
     { id: 'users', label: 'Users', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z', show: can('read','users') },
     { id: 'audit', label: 'Audit Log', icon: 'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z', show: can('read','audit') },
-    { id: 'capital', label: 'My Capital', icon: 'M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z', show: isCapitalOwner(), badge: 0 },
+    { id: 'capital', label: 'Capital Investment', icon: 'M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z', show: isCapitalOwner(), badge: 0 },
+    { id: 'bankrecon', label: 'Bank Recon', icon: 'M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3', show: state.currentUser?.role === 'Administrator', badge: 0 },
     { id: 'data', label: 'Backup & Export', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4', show: state.currentUser?.role === 'Administrator' },
     { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z', show: state.currentUser?.role === 'Administrator' }
   ];
@@ -802,6 +807,7 @@ function render() {
   else if (v === 'users') c.innerHTML = renderUsers();
   else if (v === 'audit') c.innerHTML = renderAudit();
   else if (v === 'capital') c.innerHTML = renderCapital();
+  else if (v === 'bankrecon') c.innerHTML = renderBankRecon();
   else if (v === 'data') c.innerHTML = renderDataManagement();
   else if (v === 'settings') c.innerHTML = renderSettings();
   // Init lender signature pad when on the Signature settings tab
@@ -821,7 +827,7 @@ function render() {
     const titles = {
       dashboard: 'Dashboard', loans: 'Loans', clients: 'Clients', applications: 'Applications',
       payments: 'Payments', reminders: 'Reminders', reports: 'Reports',
-      users: 'Users', audit: 'Audit Log', capital: 'My Capital', data: 'Backup & Export', settings: 'Settings'
+      users: 'Users', audit: 'Audit Log', capital: 'Capital Investment', bankrecon: 'Bank Recon', data: 'Backup & Export', settings: 'Settings'
     };
     titleEl.textContent = titles[v] || 'G & P Finance';
   }
@@ -6679,9 +6685,7 @@ function deleteApplication(appId) {
 state.capital = state.capital || [];
 
 function isCapitalOwner() {
-  const u = state.currentUser;
-  if (!u || u.role !== 'Administrator') return false;
-  return /silvanus|uunona/i.test(u.fullName || '');
+  return state.currentUser?.role === 'Administrator';
 }
 
 function renderCapital() {
@@ -6705,8 +6709,8 @@ function renderCapital() {
     <div class="space-y-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-slate-900">My Capital</h1>
-          <p class="text-sm text-slate-500 mt-1">Capital you have invested into the business. Only visible on your profile.</p>
+          <h1 class="text-2xl font-bold text-slate-900">Capital Investment</h1>
+          <p class="text-sm text-slate-500 mt-1">Capital invested into the business. Visible to Administrators only.</p>
         </div>
         <button onclick="openCapitalForm()" class="btn-primary">+ Add Capital Investment</button>
       </div>
@@ -6728,6 +6732,8 @@ function renderCapital() {
         ${reportRow('Outstanding owed by clients', fmt(outstanding), '', 'Loan book balance including interest and penalties')}
         ${reportRow('= Estimated total position', fmt(position), 'font-semibold', 'Cash on hand + amounts still owed to the business')}
         ${reportRow('Growth vs capital invested', `${gain >= 0 ? '+' : ''}${fmt(gain)} (${gainPct >= 0 ? '+' : ''}${gainPct.toFixed(1)}%)`, gain >= 0 ? 'text-green-800' : 'text-red-800', 'Total position compared to what you put in')}
+        ${(state.bankStatements || []).length ? reportRow('Cash at bank (last reconciliation)', fmt(state.bankStatements[0].closingBalance || 0), 'text-blue-800', escapeHtml(state.bankStatements[0].label || '') + ' — from Bank Recon tab') : ''}
+        ${(state.bankTx || []).some(t => t.category === 'Bank Charge') ? reportRow('Bank charges to date', '− ' + fmt(Math.abs((state.bankTx || []).filter(t => t.category === 'Bank Charge').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0))), 'text-red-800', 'From reconciled statements') : ''}
         ${cashOnHand < 0 ? `<div class="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-900"><strong>⚠ Cash shortfall:</strong> disbursements exceed capital plus collections by ${fmt(Math.abs(cashOnHand))}. This is the amount you may need to top up.</div>` : ''}
         <div class="mt-3 text-xs text-slate-400">Note: this report does not include operating expenses (rent, salaries, airtime, etc.) — it tracks loan money flow only.</div>
       </div>
@@ -6739,13 +6745,14 @@ function renderCapital() {
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
-              <th class="px-4 py-3">Date Invested</th><th class="px-4 py-3">Amount</th><th class="px-4 py-3">Notes</th><th class="px-4 py-3"></th>
+              <th class="px-4 py-3">Date Invested</th><th class="px-4 py-3">Amount</th><th class="px-4 py-3">Added By</th><th class="px-4 py-3">Notes</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
               ${entries.map(e => `
                 <tr class="border-b border-slate-100 hover:bg-slate-50">
                   <td class="px-4 py-3 whitespace-nowrap">${fmtDate(e.investedOn)}</td>
                   <td class="px-4 py-3 font-medium text-slate-900">${fmt(e.amount)}</td>
+                  <td class="px-4 py-3 text-slate-600">${escapeHtml(state.users.find(u => u.id === e.createdBy)?.fullName || '—')}</td>
                   <td class="px-4 py-3 text-slate-600">${escapeHtml(e.notes || '—')}</td>
                   <td class="px-4 py-3 text-right whitespace-nowrap">
                     <button onclick="openCapitalForm('${e.id}')" class="btn-secondary text-xs">Edit</button>
@@ -6755,7 +6762,7 @@ function renderCapital() {
               `).join('')}
             </tbody>
             <tfoot><tr class="bg-slate-50 font-semibold">
-              <td class="px-4 py-3">Total</td><td class="px-4 py-3 text-blue-800">${fmt(total)}</td><td colspan="2"></td>
+              <td class="px-4 py-3">Total</td><td class="px-4 py-3 text-blue-800">${fmt(total)}</td><td colspan="3"></td>
             </tr></tfoot>
           </table>
         </div>`}
@@ -6819,6 +6826,306 @@ function deleteCapital(entryId) {
     if (error) { showAlert('Delete failed: ' + error.message); return; }
     await logAudit('delete', 'capital', entryId, { snapshot: { investedOn: e.investedOn, amount: e.amount } });
     await saveTable('capital');
+    closeModal();
+    render();
+  });
+}
+
+// =====================================================
+// BANK RECONCILIATION — AI statement import + matching
+// =====================================================
+state.bankStatements = state.bankStatements || [];
+state.bankTx = state.bankTx || [];
+const RECON_FN_URL = SUPABASE_URL + '/functions/v1/parse-bank-statement';
+const RECON_CATEGORIES = ['Repayment', 'Disbursement', 'Bank Charge', 'Capital In', 'Other', 'Skip (do not save)'];
+
+function renderBankRecon() {
+  if (state.currentUser?.role !== 'Administrator') return '<div class="card p-8 text-center text-sm text-slate-500">This section is available to Administrators only.</div>';
+  const statements = state.bankStatements || [];
+  const charges = (state.bankTx || []).filter(t => t.category === 'Bank Charge');
+  const chargesTotal = Math.abs(charges.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0));
+  const latest = statements[0];
+  return `
+    <div class="space-y-5">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Bank Reconciliation</h1>
+        <p class="text-sm text-slate-500 mt-1">Import your bank statement — the AI reads it, matches transactions to loans and repayments, and identifies bank charges. Review before saving.</p>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Cash at Bank</div><div class="text-2xl font-bold text-blue-800 mt-1">${latest ? fmt(latest.closingBalance || 0) : '—'}</div><div class="text-xs text-slate-500">${latest ? escapeHtml(latest.label) : 'No statement imported yet'}</div></div>
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Bank Charges to Date</div><div class="text-2xl font-bold text-red-700 mt-1">${fmt(chargesTotal)}</div><div class="text-xs text-slate-500">${charges.length} charge transaction(s)</div></div>
+        <div class="card p-4"><div class="text-xs text-slate-500 uppercase">Statements Imported</div><div class="text-2xl font-bold text-slate-900 mt-1">${statements.length}</div></div>
+      </div>
+
+      <div class="card p-5">
+        <h2 class="font-semibold text-slate-900 mb-1">Import Bank Statement</h2>
+        <p class="text-xs text-slate-500 mb-3">Take photos of each page, or upload the PDF or CSV export from your banking app. Photos are compressed automatically.</p>
+        <div id="recon-file-list" class="mb-3"></div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <label class="btn-secondary text-sm cursor-pointer">
+            <input type="file" id="recon-files" accept="image/*,application/pdf,.csv,.txt" multiple class="hidden" onchange="handleReconFiles(this)">
+            Choose Statement Pages / File
+          </label>
+          <button id="recon-extract-btn" onclick="extractBankStatement()" class="btn-primary text-sm" disabled>Read Statement with AI</button>
+        </div>
+        <div id="recon-status" class="text-sm text-slate-600 mt-3"></div>
+        <div id="recon-review"></div>
+      </div>
+
+      <div class="card overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-200"><h2 class="font-semibold text-slate-900">Saved Reconciliations</h2></div>
+        ${statements.length === 0 ? `<div class="p-8 text-center text-sm text-slate-500">No statements imported yet.</div>` : `
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
+              <th class="px-4 py-3">Statement</th><th class="px-4 py-3">Imported</th><th class="px-4 py-3">Closing Balance</th><th class="px-4 py-3">Transactions</th><th class="px-4 py-3">Charges</th><th class="px-4 py-3"></th>
+            </tr></thead>
+            <tbody>
+              ${statements.map(s => {
+                const txs = (state.bankTx || []).filter(t => t.statementId === s.id);
+                const ch = Math.abs(txs.filter(t => t.category === 'Bank Charge').reduce((x, t) => x + (parseFloat(t.amount) || 0), 0));
+                return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+                  <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(s.label)}</td>
+                  <td class="px-4 py-3">${fmtDate(s.createdAt)}</td>
+                  <td class="px-4 py-3">${fmt(s.closingBalance || 0)}</td>
+                  <td class="px-4 py-3">${txs.length}</td>
+                  <td class="px-4 py-3 text-red-700">${fmt(ch)}</td>
+                  <td class="px-4 py-3 text-right whitespace-nowrap">
+                    <button onclick="viewBankStatement('${s.id}')" class="btn-secondary text-xs">View</button>
+                    <button onclick="deleteBankStatement('${s.id}')" class="text-xs text-red-600 hover:text-red-700 px-2 py-1.5 rounded hover:bg-red-50 font-medium">Delete</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`}
+      </div>
+    </div>
+  `;
+}
+
+function handleReconFiles(input) {
+  const files = Array.from(input.files || []);
+  window._reconFiles = files;
+  const el = document.getElementById('recon-file-list');
+  const btn = document.getElementById('recon-extract-btn');
+  if (files.length === 0) { el.innerHTML = ''; btn.disabled = true; return; }
+  el.innerHTML = `<div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">✓ ${files.length} file(s) selected: ${files.map(f => escapeHtml(f.name)).join(', ')}</div>`;
+  btn.disabled = false;
+}
+
+async function extractBankStatement() {
+  const files = window._reconFiles || [];
+  if (!files.length) return;
+  const btn = document.getElementById('recon-extract-btn');
+  const status = document.getElementById('recon-status');
+  btn.disabled = true;
+  status.textContent = 'Preparing files...';
+  try {
+    let body;
+    const first = files[0];
+    if (/\.csv$|\.txt$/i.test(first.name) || first.type === 'text/csv' || first.type === 'text/plain') {
+      body = { text: await first.text() };
+    } else {
+      const payload = [];
+      for (let i = 0; i < files.length; i++) {
+        status.textContent = `Preparing page ${i + 1} of ${files.length}...`;
+        const f = files[i].type === 'application/pdf' ? files[i] : await compressImageFile(files[i]);
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result.split(',')[1]);
+          r.onerror = () => rej(new Error('Could not read file'));
+          r.readAsDataURL(f);
+        });
+        payload.push({ data: b64, mime_type: f.type || 'image/jpeg' });
+      }
+      body = { files: payload };
+    }
+    status.textContent = 'Reading statement with AI — this takes 20–60 seconds...';
+    const { data: sessionData } = await db.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const resp = await fetch(RECON_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': SUPABASE_KEY },
+      body: JSON.stringify(body)
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || 'Extraction failed');
+    const txs = (result.transactions || []).map(t => ({
+      txDate: t.date || null,
+      description: t.description || '',
+      amount: parseFloat(t.amount) || 0
+    }));
+    if (!txs.length) throw new Error('No transactions found. Try a clearer photo or the CSV export from your banking app.');
+    window._reconExtracted = txs.map(t => ({ ...t, ...suggestReconCategory(t) }));
+    window._reconClosing = result.closing_balance;
+    status.innerHTML = `<span class="text-green-700">✓ ${txs.length} transactions extracted. Review below, correct anything the AI got wrong, then save.</span>`;
+    renderReconReview();
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-700">✗ ${escapeHtml(e.message)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+function reconDateNear(a, b, days) {
+  if (!a || !b) return false;
+  return Math.abs(new Date(a) - new Date(b)) <= days * 86400000;
+}
+
+function suggestReconCategory(tx) {
+  const amt = Math.abs(tx.amount);
+  window._reconUsedPayments = window._reconUsedPayments || new Set();
+  window._reconUsedLoans = window._reconUsedLoans || new Set();
+  if (tx.amount < 0 && amt <= 500 && /fee|charge|comm|service|admin|levy|sms|subscription|monthly acc/i.test(tx.description)) {
+    return { category: 'Bank Charge' };
+  }
+  if (tx.amount > 0) {
+    const pay = state.payments.find(p => !window._reconUsedPayments.has(p.id) && Math.abs(p.amount - amt) < 0.01 && reconDateNear(p.paymentDate, tx.txDate, 5));
+    if (pay) { window._reconUsedPayments.add(pay.id); return { category: 'Repayment', matchedPaymentId: pay.id }; }
+    const cap = (state.capital || []).find(c => Math.abs(c.amount - amt) < 0.01 && reconDateNear(c.investedOn, tx.txDate, 7));
+    if (cap) return { category: 'Capital In' };
+    return { category: 'Other' };
+  }
+  const loan = state.loans.find(l => !window._reconUsedLoans.has(l.id) && Math.abs(l.principal - amt) < 0.01 && reconDateNear(l.disbursementDate, tx.txDate, 5));
+  if (loan) { window._reconUsedLoans.add(loan.id); return { category: 'Disbursement', matchedLoanId: loan.id }; }
+  return { category: 'Other' };
+}
+
+function reconMatchLabel(t) {
+  if (t.matchedPaymentId) {
+    const p = state.payments.find(x => x.id === t.matchedPaymentId);
+    if (p) { const c = state.clients.find(x => x.id === state.loans.find(l => l.id === p.loanId)?.clientId); return '✓ Payment ' + paymentRef(p) + (c ? ' — ' + c.fullName : ''); }
+  }
+  if (t.matchedLoanId) {
+    const l = state.loans.find(x => x.id === t.matchedLoanId);
+    if (l) { const c = state.clients.find(x => x.id === l.clientId); return '✓ Loan ' + loanRef(l) + (c ? ' — ' + c.fullName : ''); }
+  }
+  return '';
+}
+
+function renderReconReview() {
+  const txs = window._reconExtracted || [];
+  const el = document.getElementById('recon-review');
+  if (!el || !txs.length) return;
+  const monthGuess = txs[0]?.txDate ? new Date(txs[0].txDate).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : '';
+  el.innerHTML = `
+    <div class="mt-4 border-t border-slate-200 pt-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+        <div><label>Statement Name *</label><input type="text" id="recon-label" value="${escapeHtml('Bank Statement ' + monthGuess)}" placeholder="e.g. FNB June 2026"></div>
+        <div><label>Closing Balance (Cash at Bank)</label><input type="number" step="0.01" id="recon-closing" value="${window._reconClosing != null ? window._reconClosing : ''}" placeholder="From the last page of the statement"></div>
+      </div>
+      <div class="overflow-x-auto" style="max-height:400px; overflow-y:auto;">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200 sticky top-0 bg-white">
+            <th class="px-2 py-2">Date</th><th class="px-2 py-2">Description</th><th class="px-2 py-2">Amount</th><th class="px-2 py-2">Category</th><th class="px-2 py-2">Matched To</th>
+          </tr></thead>
+          <tbody>
+            ${txs.map((t, i) => `
+              <tr class="border-b border-slate-100">
+                <td class="px-2 py-2 whitespace-nowrap">${fmtDate(t.txDate)}</td>
+                <td class="px-2 py-2 text-slate-700">${escapeHtml(t.description)}</td>
+                <td class="px-2 py-2 font-medium whitespace-nowrap ${t.amount >= 0 ? 'text-green-700' : 'text-red-700'}">${t.amount >= 0 ? '+' : ''}${fmt(t.amount)}</td>
+                <td class="px-2 py-2">
+                  <select onchange="window._reconExtracted[${i}].category = this.value" style="width:auto; padding:4px 8px; font-size:13px;">
+                    ${RECON_CATEGORIES.map(c => `<option value="${c}" ${t.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+                  </select>
+                </td>
+                <td class="px-2 py-2 text-xs text-green-700">${reconMatchLabel(t)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button onclick="window._reconExtracted = null; document.getElementById('recon-review').innerHTML=''; document.getElementById('recon-status').textContent='';" class="btn-secondary">Discard</button>
+        <button onclick="saveReconciliation()" class="btn-primary">Save Reconciliation</button>
+      </div>
+    </div>
+  `;
+}
+
+async function saveReconciliation() {
+  const txs = (window._reconExtracted || []).filter(t => t.category !== 'Skip (do not save)');
+  const label = (document.getElementById('recon-label')?.value || '').trim();
+  const closing = parseFloat(document.getElementById('recon-closing')?.value);
+  if (!label) { showAlert('Please give the statement a name (e.g. FNB June 2026).'); return; }
+  if (!txs.length) { showAlert('There are no transactions to save.'); return; }
+  const { data: st, error: stErr } = await db.from('bank_statements').insert({
+    label,
+    closing_balance: isNaN(closing) ? null : closing,
+    uploaded_by: state.currentUser?.id || null
+  }).select().single();
+  if (stErr) { showAlert('Could not save statement: ' + stErr.message); return; }
+  const rows = txs.map(t => ({
+    statement_id: st.id,
+    tx_date: t.txDate || null,
+    description: t.description || '',
+    amount: t.amount,
+    category: t.category,
+    matched_payment_id: t.matchedPaymentId || null,
+    matched_loan_id: t.matchedLoanId || null
+  }));
+  const { error: txErr } = await db.from('bank_transactions').insert(rows);
+  if (txErr) { showAlert('Could not save transactions: ' + txErr.message); return; }
+  await logAudit('create', 'bank_statement', st.id, { label, transactions: rows.length, closingBalance: closing || null });
+  window._reconExtracted = null;
+  window._reconFiles = null;
+  window._reconUsedPayments = null;
+  window._reconUsedLoans = null;
+  await saveTable('bankStatements');
+  await saveTable('bankTx');
+  showAlert(`Reconciliation "${label}" saved with ${rows.length} transactions.`, 'Saved');
+  render();
+}
+
+function viewBankStatement(stId) {
+  const s = (state.bankStatements || []).find(x => x.id === stId);
+  if (!s) return;
+  const txs = (state.bankTx || []).filter(t => t.statementId === stId).sort((a, b) => (a.txDate || '').localeCompare(b.txDate || ''));
+  const totIn = txs.filter(t => t.amount > 0).reduce((x, t) => x + t.amount, 0);
+  const totOut = Math.abs(txs.filter(t => t.amount < 0).reduce((x, t) => x + t.amount, 0));
+  const catBadge = (c) => {
+    const map = { 'Repayment': 'bg-green-100 text-green-800', 'Disbursement': 'bg-blue-100 text-blue-800', 'Bank Charge': 'bg-red-100 text-red-800', 'Capital In': 'bg-purple-100 text-purple-800', 'Other': 'bg-slate-100 text-slate-700' };
+    return `<span class="text-xs font-medium px-2 py-0.5 rounded-full ${map[c] || map.Other}">${c}</span>`;
+  };
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center sticky top-0 bg-white rounded-t-xl">
+          <div><h2 class="font-semibold text-lg">${escapeHtml(s.label)}</h2><div class="text-xs text-slate-500">Imported ${fmtDate(s.createdAt)} · Closing balance ${fmt(s.closingBalance || 0)} · In +${fmt(totIn)} / Out −${fmt(totOut)}</div></div>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6">
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
+              <th class="px-2 py-2">Date</th><th class="px-2 py-2">Description</th><th class="px-2 py-2">Amount</th><th class="px-2 py-2">Category</th><th class="px-2 py-2">Matched To</th>
+            </tr></thead>
+            <tbody>
+              ${txs.map(t => `
+                <tr class="border-b border-slate-100">
+                  <td class="px-2 py-2 whitespace-nowrap">${fmtDate(t.txDate)}</td>
+                  <td class="px-2 py-2 text-slate-700">${escapeHtml(t.description || '')}</td>
+                  <td class="px-2 py-2 font-medium whitespace-nowrap ${t.amount >= 0 ? 'text-green-700' : 'text-red-700'}">${t.amount >= 0 ? '+' : ''}${fmt(t.amount)}</td>
+                  <td class="px-2 py-2">${catBadge(t.category)}</td>
+                  <td class="px-2 py-2 text-xs text-green-700">${reconMatchLabel(t)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function deleteBankStatement(stId) {
+  const s = (state.bankStatements || []).find(x => x.id === stId);
+  if (!s) return;
+  confirmAction(`Delete reconciliation "${s.label}" and all its transactions?\n\nThis cannot be undone.`, async () => {
+    const { error } = await db.from('bank_statements').delete().eq('id', stId);
+    if (error) { showAlert('Delete failed: ' + error.message); return; }
+    await logAudit('delete', 'bank_statement', stId, { label: s.label });
+    await saveTable('bankStatements');
+    await saveTable('bankTx');
     closeModal();
     render();
   });
