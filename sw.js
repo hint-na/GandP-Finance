@@ -1,5 +1,5 @@
-// G & P Finance Service Worker v5 (network-first HTML + push + online applications + reliable uploads)
-const CACHE_NAME = 'gp-finance-v5';
+// G & P Finance Service Worker v6 (network-first HTML + push + online applications + reliable uploads + phone prefix)
+const CACHE_NAME = 'gp-finance-v6';
 const APP_SHELL = [
   './manifest.json',
   'https://cdn.tailwindcss.com',

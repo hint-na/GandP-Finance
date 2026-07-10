@@ -1388,8 +1388,8 @@ function openClientForm(editId) {
         <div class="p-6 grid grid-cols-2 gap-4">
           <div class="col-span-2"><label>Full Name *</label><input type="text" id="c-fullName" value="${escapeHtml(editing?.fullName || '')}" required></div>
           <div><label>ID Number *</label><input type="text" id="c-idNumber" value="${escapeHtml(editing?.idNumber || '')}" required></div>
-          <div><label>Phone *</label><input type="tel" id="c-phone" value="${escapeHtml(editing?.phone || '')}" placeholder="+264 ..." required></div>
-          <div><label>Alternative Phone</label><input type="tel" id="c-altPhone" value="${escapeHtml(editing?.altPhone || '')}"></div>
+          <div><label>Phone (WhatsApp) *</label>${phonePrefixInput('c-phone', editing?.phone, true)}</div>
+          <div><label>Alternative Phone</label>${phonePrefixInput('c-altPhone', editing?.altPhone, false)}</div>
           <div><label>Email</label><input type="email" id="c-email" value="${escapeHtml(editing?.email || '')}"></div>
           <div class="col-span-2"><label>Address</label><input type="text" id="c-address" value="${escapeHtml(editing?.address || '')}"></div>
           <div><label>Employer / Business</label><input type="text" id="c-employer" value="${escapeHtml(editing?.employer || '')}"></div>
@@ -1451,13 +1451,15 @@ async function loadExistingKycPreview(clientId) {
 async function saveClient(editId) {
   const fullName = document.getElementById('c-fullName').value.trim();
   const idNumber = document.getElementById('c-idNumber').value.trim();
-  const phone = document.getElementById('c-phone').value.trim();
-  if (!fullName || !idNumber || !phone) { showAlert('Full name, ID number and phone are required.'); return; }
+  const phoneDigits = namibianDigits(document.getElementById('c-phone').value);
+  if (!fullName || !idNumber || !phoneDigits) { showAlert('Full name, ID number and phone are required.'); return; }
+  if (phoneDigits.length < 7) { showAlert('Please check the phone number — it looks too short. Enter the number without the leading 0 (e.g. 81 234 5678).'); return; }
+  const phone = '+264' + phoneDigits;
   const record = {
     full_name: fullName,
     id_number: idNumber,
     phone,
-    alt_phone: document.getElementById('c-altPhone').value.trim() || null,
+    alt_phone: formatNamibianPhone(document.getElementById('c-altPhone').value) || null,
     email: document.getElementById('c-email').value.trim() || null,
     address: document.getElementById('c-address').value.trim() || null,
     employer: document.getElementById('c-employer').value.trim() || null,
@@ -2395,6 +2397,32 @@ function downloadDataUrl(dataUrl, filename) {
 // =====================================================
 // WHATSAPP SHARING
 // =====================================================
+// =====================================================
+// NAMIBIAN PHONE NUMBER HELPERS (+264)
+// =====================================================
+// Returns just the local digits: strips +264 / 264 / 00264 prefixes and a leading 0
+function namibianDigits(raw) {
+  let d = (raw || '').toString().replace(/\D/g, '');
+  if (d.startsWith('00264')) d = d.substring(5);
+  else if (d.startsWith('264')) d = d.substring(3);
+  if (d.startsWith('0')) d = d.substring(1);
+  return d;
+}
+// Full international format for storage: +26481xxxxxxx
+function formatNamibianPhone(raw) {
+  const d = namibianDigits(raw);
+  return d ? '+264' + d : '';
+}
+// A phone input with a fixed +264 prefix; the person types only the local number
+function phonePrefixInput(id, value, required, placeholder) {
+  return `
+    <div style="display:flex; align-items:stretch;">
+      <span style="display:flex; align-items:center; background:#f1f5f9; border:1px solid #cbd5e1; border-right:0; border-radius:8px 0 0 8px; padding:0 10px; font-size:14px; color:#334155; white-space:nowrap;">+264</span>
+      <input type="tel" id="${id}" inputmode="numeric" value="${escapeHtml(namibianDigits(value || ''))}" placeholder="${placeholder || '81 234 5678'}" ${required ? 'required' : ''} style="border-radius:0 8px 8px 0;" oninput="this.value = this.value.replace(/[^0-9 ]/g, '')">
+    </div>
+  `;
+}
+
 function whatsappLink(phone, message) {
   // Strip non-digits, ensure starts with country code
   let num = (phone || '').replace(/[^0-9]/g, '');
@@ -6052,8 +6080,8 @@ function renderApplyPage() {
         </div>
         <div>
           <label>Mobile Number (WhatsApp) <span class="text-red-600">*</span></label>
-          <input type="tel" id="app-phone" inputmode="tel" placeholder="e.g. 081 234 5678" autocomplete="tel">
-          <div class="text-xs text-slate-500 mt-1">We will contact you on this WhatsApp number.</div>
+          ${phonePrefixInput('app-phone', '', true)}
+          <div class="text-xs text-slate-500 mt-1">Enter your number without the first 0, e.g. <strong>81 234 5678</strong>. We will contact you on this WhatsApp number.</div>
         </div>
         <div>
           <label>Loan Amount Requested (N$)</label>
@@ -6175,11 +6203,11 @@ async function submitApplication() {
   const btn = document.getElementById('apply-submit-btn');
   const name = document.getElementById('app-fullName').value.trim();
   const idNum = document.getElementById('app-idNumber').value.trim().replace(/\s/g, '');
-  const phoneRaw = document.getElementById('app-phone').value.trim();
+  const phoneDigits = namibianDigits(document.getElementById('app-phone').value);
+  const phoneRaw = '+264' + phoneDigits;
   const amount = parseFloat(document.getElementById('app-amount').value) || null;
-  const phoneDigits = phoneRaw.replace(/[^0-9]/g, '');
   if (!/^\d{9,13}$/.test(idNum)) { alert('Please check your ID number — it should be the digits on your Namibian ID.'); return; }
-  if (phoneDigits.length < 9) { alert('Please check your mobile number — it looks too short.'); return; }
+  if (phoneDigits.length < 7 || phoneDigits.length > 9) { alert('Please check your mobile number — enter it without the first 0, for example 81 234 5678.'); return; }
 
   btn.disabled = true;
   // Keep the same application ID and completed-upload record across retries,
