@@ -1,5 +1,5 @@
-// G & P Finance Service Worker v15 (in-app document viewer)
-const CACHE_NAME = 'gp-finance-v15';
+// G & P Finance Service Worker v16 (PDF pages rendered in-app)
+const CACHE_NAME = 'gp-finance-v16';
 const APP_SHELL = [
   './manifest.json',
   'https://cdn.tailwindcss.com',

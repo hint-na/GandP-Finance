@@ -5383,8 +5383,12 @@ async function viewDocument(publicUrl, filename) {
     const body = document.getElementById('doc-viewer-body');
     if (!body) return;
     if (isPdf) {
-      body.innerHTML = `<iframe src="${signedUrl}" style="width:100%; height:75vh; border:0; border-radius:8px; background:#f8fafc;"></iframe>
-        <div class="text-xs text-slate-500 mt-2">If the PDF does not display on this device, use "Open in New Tab".</div>`;
+      body.innerHTML = `<div class="text-sm text-slate-500 py-16">Preparing PDF pages...</div>`;
+      try {
+        await renderPdfInViewer(signedUrl, body);
+      } catch (pdfErr) {
+        body.innerHTML = `<div class="text-sm text-slate-600 py-10">This PDF could not be displayed here (${escapeHtml(pdfErr.message)}).<br>Use "Open in New Tab" instead.</div>`;
+      }
     } else {
       body.innerHTML = `<img src="${signedUrl}" style="max-width:100%; max-height:78vh; border-radius:8px;" alt="${escapeHtml(filename || 'Document')}">`;
     }
@@ -5399,6 +5403,50 @@ async function viewDocument(publicUrl, filename) {
 function closeDocViewer() {
   const o = document.getElementById('doc-viewer-overlay');
   if (o) o.remove();
+}
+
+// Loads the PDF renderer on demand (cached after first use)
+async function ensurePdfJs() {
+  if (window.pdfjsLib) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = res;
+    s.onerror = () => rej(new Error('Could not load the PDF viewer. Check your connection.'));
+    document.head.appendChild(s);
+  });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+// Draws every PDF page inside the viewer — no browser download behaviour involved
+async function renderPdfInViewer(signedUrl, body) {
+  const resp = await fetch(signedUrl);
+  if (!resp.ok) throw new Error('Could not fetch the document.');
+  const data = await resp.arrayBuffer();
+  await ensurePdfJs();
+  const pdf = await window.pdfjsLib.getDocument({ data }).promise;
+  body.innerHTML = '';
+  const containerWidth = Math.min(body.clientWidth || 700, 900) - 12;
+  const maxPages = Math.min(pdf.numPages, 30);
+  for (let p = 1; p <= maxPages; p++) {
+    const page = await pdf.getPage(p);
+    const base = page.getViewport({ scale: 1 });
+    const scale = containerWidth / base.width;
+    const dpr = window.devicePixelRatio || 1;
+    const vp = page.getViewport({ scale: scale * dpr });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    canvas.style.width = containerWidth + 'px';
+    canvas.style.borderRadius = '8px';
+    canvas.style.border = '1px solid #e2e8f0';
+    canvas.style.marginBottom = '8px';
+    body.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  }
+  if (pdf.numPages > maxPages) {
+    body.insertAdjacentHTML('beforeend', `<div class="text-xs text-slate-500 mb-2">Showing first ${maxPages} of ${pdf.numPages} pages. Use "Open in New Tab" for the full file.</div>`);
+  }
 }
 
 async function downloadDocument(publicUrl, filename) {
