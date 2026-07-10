@@ -5356,10 +5356,49 @@ async function getSignedUrl(publicUrl) {
 
 async function viewDocument(publicUrl, filename) {
   if (!publicUrl) { showAlert('No document available'); return; }
-  showAlert('Opening document...', 'Please wait');
-  const signedUrl = await getSignedUrl(publicUrl);
-  closeConfirm();
-  window.open(signedUrl, '_blank');
+  closeDocViewer();
+  const overlay = document.createElement('div');
+  overlay.id = 'doc-viewer-overlay';
+  overlay.className = 'fixed inset-0 modal-backdrop flex items-center justify-center p-4';
+  overlay.style.zIndex = '70';
+  overlay.onclick = (e) => { if (e.target === overlay) closeDocViewer(); };
+  overlay.innerHTML = `
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col" style="max-height:92vh;">
+      <div class="px-4 py-3 border-b border-slate-200 flex justify-between items-center gap-2">
+        <div class="text-sm font-semibold text-slate-900 truncate">${escapeHtml(filename || 'Document')}</div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button id="doc-viewer-open" class="btn-secondary text-xs">Open in New Tab</button>
+          <button onclick="closeDocViewer()" class="text-slate-400 hover:text-slate-600 px-2 text-lg">✕</button>
+        </div>
+      </div>
+      <div id="doc-viewer-body" class="overflow-auto p-3 text-center" style="min-height:200px;">
+        <div class="text-sm text-slate-500 py-16">Loading document...</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  try {
+    const signedUrl = await getSignedUrl(publicUrl);
+    const isPdf = /\.pdf$/i.test((publicUrl || '').split('?')[0]);
+    const body = document.getElementById('doc-viewer-body');
+    if (!body) return;
+    if (isPdf) {
+      body.innerHTML = `<iframe src="${signedUrl}" style="width:100%; height:75vh; border:0; border-radius:8px; background:#f8fafc;"></iframe>
+        <div class="text-xs text-slate-500 mt-2">If the PDF does not display on this device, use "Open in New Tab".</div>`;
+    } else {
+      body.innerHTML = `<img src="${signedUrl}" style="max-width:100%; max-height:78vh; border-radius:8px;" alt="${escapeHtml(filename || 'Document')}">`;
+    }
+    const openBtn = document.getElementById('doc-viewer-open');
+    if (openBtn) openBtn.onclick = () => window.open(signedUrl, '_blank');
+  } catch (e) {
+    const body = document.getElementById('doc-viewer-body');
+    if (body) body.innerHTML = `<div class="text-sm text-red-700 py-10">Could not load document: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function closeDocViewer() {
+  const o = document.getElementById('doc-viewer-overlay');
+  if (o) o.remove();
 }
 
 async function downloadDocument(publicUrl, filename) {
