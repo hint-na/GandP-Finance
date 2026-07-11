@@ -499,10 +499,13 @@ function diffObjects(before, after, ignoreFields = ['updatedAt', 'createdAt']) {
 function generateSchedule(loan) {
   const schedule = [];
   const baseDate = new Date(loan.disbursementDate);
+  // First instalment lands on the client's payday when one was chosen;
+  // later instalments follow monthly from it.
+  const firstDue = loan.firstPaymentDate ? new Date(loan.firstPaymentDate) : null;
   let remaining = loan.totalRepayable;
   for (let i = 1; i <= loan.termMonths; i++) {
-    const dueDate = new Date(baseDate);
-    dueDate.setMonth(dueDate.getMonth() + i);
+    const dueDate = firstDue ? new Date(firstDue) : new Date(baseDate);
+    dueDate.setMonth(dueDate.getMonth() + (firstDue ? i - 1 : i));
     const amount = (i === loan.termMonths) ? remaining : loan.monthlyInstallment;
     remaining -= amount;
     schedule.push({
@@ -895,7 +898,10 @@ function renderDashboard() {
           <div class="text-2xl font-bold text-blue-900 mt-1">${fmt(expectedToday)}</div>
           <div class="text-xs text-blue-700 mt-1">${dueToday.length} instalment(s) due today</div>
         </div>
-        <button onclick="navigate('reports'); state.currentReportTab='daily'; render();" class="btn-primary">View Collection Sheet</button>
+        <div class="flex gap-2">
+          <button onclick="navigate('reminders')" class="btn-secondary">Send Reminders</button>
+          <button onclick="navigate('reports'); state.currentReportTab='daily'; render();" class="btn-primary">View Collection Sheet</button>
+        </div>
       </div>
     </div>
 
@@ -1091,7 +1097,7 @@ function openLoanForm(editId, preselectClientId) {
           </div>` : ''}
           <div>
             <label>Client *</label>
-            <select id="f-clientId" required ${editing ? 'disabled' : ''} onchange="showKycWarningForClient(this.value)">
+            <select id="f-clientId" required ${editing ? 'disabled' : ''} onchange="showKycWarningForClient(this.value); prefillFirstPaymentFromApplication(this.value)">
               <option value="">Select client...</option>
               ${state.clients.map(c => `<option value="${c.id}" ${(editing?.clientId===c.id || (!editing && preselectClientId===c.id))?'selected':''}>${escapeHtml(c.fullName)} - ${escapeHtml(c.phone)}</option>`).join('')}
             </select>
@@ -1104,7 +1110,12 @@ function openLoanForm(editId, preselectClientId) {
             <div><label>Term (months) *</label><input type="number" id="f-term" min="1" value="${editing?.termMonths || state.settings?.defaultTerm || 6}" oninput="updateLoanCalc()" required></div>
           </div>
           <div class="grid grid-cols-2 gap-4">
-            <div><label>Disbursement Date *</label><input type="date" id="f-disbDate" value="${editing?.disbursementDate || today()}" required></div>
+            <div><label>Disbursement Date *</label><input type="date" id="f-disbDate" value="${editing?.disbursementDate || today()}" required onchange="syncFirstPaymentDefault()"></div>
+            <div>
+              <label>First Payment Date (client's payday) *</label>
+              <input type="date" id="f-firstPayDate" value="${editing ? (editing.schedule?.[0]?.dueDate || '') : ''}" required>
+              <div id="firstpay-hint" class="text-xs text-blue-700 mt-1"></div>
+            </div>
             ${editing ? `<div><label>Status</label><select id="f-status">
               <option value="Pending" ${editing.status==='Pending'?'selected':''}>Pending</option>
               <option value="Active" ${editing.status==='Active'?'selected':''}>Active</option>
@@ -1131,7 +1142,52 @@ function openLoanForm(editId, preselectClientId) {
   `;
   document.getElementById('modal-container').innerHTML = modal;
   if (editing) updateLoanCalc();
+  if (!editing) {
+    document.getElementById('f-firstPayDate').value = defaultFirstPaymentDate(today());
+    prefillFirstPaymentFromApplication(preselectClientId || '');
+  }
   if (!editing && preselectClientId) setTimeout(() => showKycWarningForClient(preselectClientId), 50);
+}
+
+function defaultFirstPaymentDate(disbDate) {
+  const d = new Date(disbDate);
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().split('T')[0];
+}
+
+// Next occurrence of the payday the client gave on their loan application
+function nextClientPayday(clientId) {
+  const withDate = (state.applications || []).filter(a => a.clientId === clientId && applicationRepayDate(a));
+  if (!withDate.length) return null;
+  withDate.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+  const d = new Date(applicationRepayDate(withDate[0]));
+  const t = new Date(today());
+  while (d <= t) d.setMonth(d.getMonth() + 1);
+  return d.toISOString().split('T')[0];
+}
+
+function prefillFirstPaymentFromApplication(clientId) {
+  const el = document.getElementById('f-firstPayDate');
+  const hint = document.getElementById('firstpay-hint');
+  if (!el) return;
+  const payday = clientId ? nextClientPayday(clientId) : null;
+  if (payday) {
+    el.value = payday;
+    if (hint) hint.textContent = 'Pre-filled with the payday from the client’s loan application.';
+  } else {
+    if (hint) hint.textContent = '';
+  }
+}
+
+// Keep the default first-payment date in step when disbursement changes,
+// unless a payday from the application is in charge of the field.
+function syncFirstPaymentDefault() {
+  const el = document.getElementById('f-firstPayDate');
+  const hint = document.getElementById('firstpay-hint');
+  const disb = document.getElementById('f-disbDate')?.value;
+  if (!el || !disb) return;
+  if (hint && hint.textContent) return;
+  el.value = defaultFirstPaymentDate(disb);
 }
 
 function updateLoanCalc() {
@@ -1151,10 +1207,14 @@ async function saveLoan(editId) {
   const rate = parseFloat(document.getElementById('f-rate').value);
   const term = parseInt(document.getElementById('f-term').value);
   const disbDate = document.getElementById('f-disbDate').value;
+  const firstPayDate = document.getElementById('f-firstPayDate')?.value || '';
   const purpose = document.getElementById('f-purpose').value;
   const productEl = document.getElementById('f-productId');
   const productId = productEl ? productEl.value : '';
-  if (!clientId || !principal || !rate || !term || !disbDate) { showAlert('Please fill all required fields.'); return; }
+  if (!clientId || !principal || !rate || !term || !disbDate || !firstPayDate) { showAlert('Please fill all required fields.'); return; }
+  if (firstPayDate <= disbDate) { showAlert('The first payment date must be after the disbursement date.'); return; }
+  const latestFirstPay = new Date(disbDate); latestFirstPay.setMonth(latestFirstPay.getMonth() + 2);
+  if (firstPayDate > latestFirstPay.toISOString().split('T')[0]) { showAlert('The first payment date should be within two months of disbursement. Please check the date.'); return; }
 
   if (productId) {
     const product = state.products.find(p => p.id === productId);
@@ -1180,9 +1240,11 @@ async function saveLoan(editId) {
       total_repayable: totalRepayable, monthly_installment: monthlyInstallment, purpose
     };
     if (statusEl) record.status = statusEl.value;
-    // Regenerate schedule if core terms changed
-    if (before.principal !== principal || before.interestRate !== rate || before.termMonths !== term || before.disbursementDate !== disbDate) {
-      record.schedule = generateSchedule({ ...before, principal, interestRate: rate, termMonths: term, disbursementDate: disbDate, totalRepayable, monthlyInstallment });
+    // Regenerate schedule if core terms or the first payment date changed
+    const firstPayChanged = firstPayDate !== (before.schedule?.[0]?.dueDate || '');
+    if (before.principal !== principal || before.interestRate !== rate || before.termMonths !== term || before.disbursementDate !== disbDate || firstPayChanged) {
+      record.schedule = generateSchedule({ ...before, principal, interestRate: rate, termMonths: term, disbursementDate: disbDate, firstPaymentDate: firstPayDate, totalRepayable, monthlyInstallment });
+      record.maturity_date = record.schedule[record.schedule.length - 1].dueDate;
     }
     const { error } = await db.from('loans').update(record).eq('id', editId);
     if (error) { showAlert('Save failed: ' + error.message); return; }
@@ -1197,7 +1259,8 @@ async function saveLoan(editId) {
       status: 'Active', purpose,
       created_by: state.currentUser?.id || null
     };
-    record.schedule = generateSchedule({ ...record, disbursementDate: disbDate, termMonths: term, totalRepayable, monthlyInstallment });
+    record.schedule = generateSchedule({ ...record, disbursementDate: disbDate, firstPaymentDate: firstPayDate, termMonths: term, totalRepayable, monthlyInstallment });
+    record.maturity_date = record.schedule[record.schedule.length - 1].dueDate;
     const { data, error } = await db.from('loans').insert(record).select().single();
     if (error) { showAlert('Save failed: ' + error.message); return; }
     await logAudit('create', 'loan', data.id, { clientId, productId, principal, rate, term });
@@ -2948,19 +3011,25 @@ async function sendSignedAgreementWhatsApp(loanId) {
   window.open(waUrl, '_blank');
 }
 
+function loanFirstDueDate(loan) {
+  const sched = loan.schedule;
+  if (sched && sched.length) return new Date(sched[0].dueDate);
+  const d = new Date(loan.disbursementDate || loan.disbursement_date);
+  d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
 function buildSignedAgreementLinkMessage(loan, client, companyName, url) {
   const firstName = client.fullName.split(' ')[0];
   const principal = fmt(loan.principal);
-  const firstDue = new Date(loan.disbursementDate);
-  firstDue.setMonth(firstDue.getMonth() + 1);
+  const firstDue = loanFirstDueDate(loan);
   return `Hello ${firstName},\n\nThank you for signing your loan agreement with ${companyName}.\n\nYou can view and download your signed agreement here:\n${url}\n\nLoan Reference: ${loanRef(loan)}\nPrincipal: ${principal}\nTotal Repayable: ${fmt(loan.totalRepayable)}\nMonthly Instalment: ${fmt(loan.monthlyInstallment)}\nFirst Payment Due: ${firstDue.toISOString().slice(0,10)}\n\nThis link is valid for 30 days.\n\n${companyName}`;
 }
 
 function buildSignedAgreementMessage(loan, client, companyName) {
   const firstName = client.fullName.split(' ')[0];
   const principal = fmt(loan.principal);
-  const firstDue = new Date(loan.disbursementDate);
-  firstDue.setMonth(firstDue.getMonth() + 1);
+  const firstDue = loanFirstDueDate(loan);
   return `Hello ${firstName},\n\nThank you for signing your loan agreement with ${companyName}.\n\nAttached is your signed copy for your records.\n\nLoan Reference: ${loanRef(loan)}\nPrincipal: ${principal}\nTotal Repayable: ${fmt(loan.totalRepayable)}\nMonthly Instalment: ${fmt(loan.monthlyInstallment)}\nFirst Payment Due: ${firstDue.toISOString().slice(0,10)}\n\nFunds will be released shortly.\n\n${companyName}`;
 }
 
@@ -3749,7 +3818,7 @@ function bulkSendStatements() {
 // =====================================================
 function renderReminders() {
   const today_ = today();
-  const upcoming = []; // due within next 3 days, not yet due
+  const upcoming = []; // due within next 7 days, not yet due
   const overdue = []; // already overdue
 
   state.loans.forEach(l => {
@@ -3762,7 +3831,7 @@ function renderReminders() {
       const days = daysBetween(s.dueDate, today_);
       if (days >= 0 && days <= 30) {
         overdue.push({ loan: l, client: c, inst: s, daysOverdue: days, balance });
-      } else if (days < 0 && days >= -3) {
+      } else if (days < 0 && days >= -7) {
         upcoming.push({ loan: l, client: c, inst: s, daysUntil: -days, balance });
       }
     });
@@ -3795,7 +3864,7 @@ function renderReminders() {
         <div class="text-sm text-slate-600 mt-1">${fmt(totalOverdueAmount)} in arrears</div>
       </div>
       <div class="card p-5 border-l-4" style="border-left-color:#f59e0b">
-        <div class="text-xs font-medium text-amber-700 uppercase">Due in Next 3 Days</div>
+        <div class="text-xs font-medium text-amber-700 uppercase">Due in Next 7 Days</div>
         <div class="text-3xl font-bold text-amber-700 mt-2">${upcoming.length}</div>
         <div class="text-sm text-slate-600 mt-1">${fmt(totalUpcomingAmount)} expected</div>
       </div>
@@ -3827,7 +3896,7 @@ function renderReminders() {
         <h3 class="font-semibold text-amber-900">Upcoming Payments</h3>
         <p class="text-xs text-amber-800 mt-1">Send friendly reminders to clients with payments due soon</p>
       </div>
-      ${upcoming.length === 0 ? '<div class="p-12 text-center text-slate-500">No payments due in the next 3 days.</div>' : `
+      ${upcoming.length === 0 ? '<div class="p-12 text-center text-slate-500">No payments due in the next 7 days.</div>' : `
         <table>
           <thead><tr><th>Client</th><th>Phone</th><th>Loan Ref</th><th>Due In</th><th>Amount</th><th class="text-right">Action</th></tr></thead>
           <tbody>
@@ -4812,8 +4881,7 @@ async function renderSignaturePage(token) {
   const email = settings?.email || '';
   const namfisaReg = settings?.namfisa_reg || 'Pending';
 
-  const firstDue = new Date(loan.disbursement_date);
-  firstDue.setMonth(firstDue.getMonth() + 1);
+  const firstDue = loanFirstDueDate(loan);
 
   container.innerHTML = `
     <div class="max-w-2xl mx-auto">
