@@ -5552,7 +5552,11 @@ async function submitSignature(token, loanId) {
     }
     const { error: upErr } = await db.from('loans').update(updates).eq('id', loanId);
     if (upErr) throw upErr;
-    await db.from('client_links').update({ completed_at: now }).eq('token', token);
+    // Mark the signature link used, and extend it 30 days so the same
+    // link now serves as the client's signed-agreement link.
+    const agreementExpiry = new Date();
+    agreementExpiry.setDate(agreementExpiry.getDate() + 30);
+    await db.from('client_links').update({ completed_at: now, expires_at: agreementExpiry.toISOString() }).eq('token', token);
     // Notify staff
     try {
       await db.rpc('create_broadcast_notification', {
@@ -5569,6 +5573,8 @@ async function submitSignature(token, loanId) {
         loan_id: loanId
       });
     } catch (e) { console.warn('Notification create failed:', e); }
+    const agreementUrl = `${location.origin}${location.pathname}?agreement=${encodeURIComponent(token)}`;
+    const waKeepMsg = `My signed loan agreement with GPL Finance:\n${agreementUrl}\n\nReference: kept for my records. Link valid for 30 days.`;
     document.getElementById('public-container').innerHTML = `
       <div class="max-w-md mx-auto text-center py-12">
         <div class="w-16 h-16 bg-green-100 rounded-full mx-auto flex items-center justify-center mb-4">
@@ -5577,6 +5583,16 @@ async function submitSignature(token, loanId) {
         <h1 class="text-xl font-bold text-slate-900">Agreement Signed</h1>
         <p class="text-sm text-slate-600 mt-2">Thank you, ${escapeHtml(name)}.</p>
         <p class="text-sm text-slate-600 mt-1">Your signed agreement has been received. Funds will be released shortly.</p>
+
+        <div class="bg-white rounded-xl border border-slate-200 p-5 mt-6 text-left">
+          <div class="font-semibold text-slate-900 text-sm">Your copy of the signed agreement</div>
+          <p class="text-xs text-slate-500 mt-1 mb-3">This link is yours to keep — view or download your signed agreement anytime in the next 30 days.</p>
+          <a href="${agreementUrl}" class="btn-primary w-full block text-center" style="min-height:48px; line-height:32px;">View My Signed Agreement</a>
+          <button onclick="window.open('https://wa.me/?text=${encodeURIComponent(waKeepMsg).replace(/'/g, '%27')}', '_blank')" class="w-full mt-2 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+            Keep the Link on WhatsApp
+          </button>
+        </div>
       </div>
     `;
   } catch (e) {
@@ -5625,8 +5641,10 @@ async function renderAgreementViewPage(token) {
   container.innerHTML = `<div class="max-w-md mx-auto text-center py-12"><div class="text-slate-500">Loading your agreement...</div></div>`;
   document.body.appendChild(container);
 
-  // Look up the token
-  const { data: link } = await db.from('client_links').select('*').eq('token', token).eq('link_type', 'agreement').maybeSingle();
+  // Look up the token — a completed signature link doubles as the
+  // client's agreement link (the page below still requires the loan
+  // to actually be signed).
+  const { data: link } = await db.from('client_links').select('*').eq('token', token).in('link_type', ['agreement', 'signature']).maybeSingle();
   if (!link) return renderPublicError(container, 'Invalid link', 'This agreement link is not valid. Please contact GPL Finance.');
   if (new Date(link.expires_at) < new Date()) return renderPublicError(container, 'Link expired', 'This agreement link has expired. Please contact GPL Finance for a new link.');
 
