@@ -632,6 +632,10 @@ async function logout() {
     db.removeChannel(window._notificationChannel);
     window._notificationChannel = null;
   }
+  if (window._dataChannel) {
+    db.removeChannel(window._dataChannel);
+    window._dataChannel = null;
+  }
   document.title = window._originalTitle || 'GPL Finance';
   renderApp();
 }
@@ -661,6 +665,10 @@ function handleSessionExpired() {
   if (window._notificationChannel) {
     db.removeChannel(window._notificationChannel);
     window._notificationChannel = null;
+  }
+  if (window._dataChannel) {
+    db.removeChannel(window._dataChannel);
+    window._dataChannel = null;
   }
   document.title = window._originalTitle || 'GPL Finance';
   renderApp();
@@ -779,6 +787,8 @@ async function doLogin() {
   await loadData();
   await loadNotifications();
   subscribeToNotifications();
+  subscribeToDataChanges();
+  maybeAutoBackup();
   renderApp();
 }
 
@@ -854,7 +864,7 @@ function render() {
   else if (v === 'audit') c.innerHTML = renderAudit();
   else if (v === 'capital') c.innerHTML = renderCapital();
   else if (v === 'bankrecon') c.innerHTML = renderBankRecon();
-  else if (v === 'data') c.innerHTML = renderDataManagement();
+  else if (v === 'data') { c.innerHTML = renderDataManagement(); setTimeout(hydrateCloudBackups, 50); }
   else if (v === 'settings') c.innerHTML = renderSettings();
   // Init lender signature pad when on the Signature settings tab
   if (v === 'settings' && state.currentSettingsTab === 'signature') {
@@ -4354,11 +4364,117 @@ async function commitCsvImport(dataRows, cols) {
 // =====================================================
 // DATA MANAGEMENT VIEW
 // =====================================================
+// =====================================================
+// AUTOMATIC DAILY CLOUD BACKUP (Supabase Storage bucket "backups")
+// =====================================================
+const BACKUP_BUCKET = 'backups';
+
+function buildCloudBackupObject() {
+  return {
+    appName: 'GPL Finance',
+    version: 1,
+    type: 'daily-cloud-backup',
+    exportDate: new Date().toISOString(),
+    clients: state.clients,
+    loans: state.loans,
+    payments: state.payments,
+    products: state.products,
+    applications: state.applications,
+    clientLinks: state.clientLinks,
+    capital: state.capital,
+    settings: state.settings,
+    users: state.users.map(u => ({ ...u, passwordHash: '[redacted]' })),
+    audit: state.audit
+  };
+}
+
+// Runs on login: if today's backup doesn't exist yet, create it silently.
+async function maybeAutoBackup() {
+  if (state.currentUser?.role !== 'Administrator') return;
+  try {
+    const name = `backup-${today()}.json`;
+    const { data: files, error } = await db.storage.from(BACKUP_BUCKET).list('', { limit: 5, search: name });
+    if (error) { window._backupStatus = 'setup-needed'; return; }
+    if ((files || []).some(f => f.name === name)) { window._backupStatus = 'ok'; return; }
+    await runCloudBackup('auto');
+  } catch (e) { console.warn('Auto-backup skipped:', e); }
+}
+
+async function runCloudBackup(mode) {
+  const name = `backup-${today()}.json`;
+  const blob = new Blob([JSON.stringify(buildCloudBackupObject())], { type: 'application/json' });
+  const { error } = await db.storage.from(BACKUP_BUCKET).upload(name, blob, { upsert: true, contentType: 'application/json' });
+  if (error) {
+    window._backupStatus = 'setup-needed';
+    if (mode === 'manual') showAlert('Could not save the backup to cloud storage: ' + error.message + '\n\nThe "backups" storage bucket may not be set up yet — see the note on this page.', 'Backup Failed');
+    return false;
+  }
+  window._backupStatus = 'ok';
+  logAudit('backup', 'system', null, { file: name, mode });
+  // Keep the newest 30 daily backups, prune the rest
+  try {
+    const { data: files } = await db.storage.from(BACKUP_BUCKET).list('', { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+    const stale = (files || []).filter(f => f.name.startsWith('backup-')).slice(30).map(f => f.name);
+    if (stale.length) await db.storage.from(BACKUP_BUCKET).remove(stale);
+  } catch (e) { /* pruning is best-effort */ }
+  return true;
+}
+
+async function manualCloudBackup() {
+  const btn = document.getElementById('cloud-backup-now');
+  if (btn) { btn.disabled = true; btn.textContent = 'Backing up...'; }
+  const ok = await runCloudBackup('manual');
+  if (btn) { btn.disabled = false; btn.textContent = 'Back Up Now'; }
+  if (ok) { showAlert('Backup saved to cloud storage.', 'Backup Complete'); hydrateCloudBackups(); }
+}
+
+async function hydrateCloudBackups() {
+  const el = document.getElementById('cloud-backup-list');
+  if (!el) return;
+  const { data: files, error } = await db.storage.from(BACKUP_BUCKET).list('', { limit: 7, sortBy: { column: 'name', order: 'desc' } });
+  if (error) {
+    el.innerHTML = `
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+        <strong>One-time setup needed:</strong> in your Supabase dashboard, open <strong>Storage</strong> and create a <strong>private</strong> bucket named <code>backups</code>, then add a policy allowing the <em>authenticated</em> role to read and write it. Daily backups will start automatically after that.
+      </div>`;
+    return;
+  }
+  const backups = (files || []).filter(f => f.name.startsWith('backup-'));
+  if (!backups.length) { el.innerHTML = '<div class="text-sm text-slate-500">No cloud backups yet — the first one is created automatically when an administrator signs in each day.</div>'; return; }
+  el.innerHTML = backups.map(f => `
+    <div class="flex justify-between items-center py-2 border-b border-slate-100 text-sm">
+      <div><span class="font-medium">${escapeHtml(f.name.replace('backup-', '').replace('.json', ''))}</span>
+        <span class="text-xs text-slate-500 ml-2">${f.metadata?.size ? Math.round(f.metadata.size / 1024) + ' KB' : ''}</span></div>
+      <button onclick="downloadCloudBackup('${escapeHtml(f.name)}')" class="btn-secondary text-xs">Download</button>
+    </div>`).join('');
+}
+
+async function downloadCloudBackup(name) {
+  const { data, error } = await db.storage.from(BACKUP_BUCKET).download(name);
+  if (error) { showAlert('Could not download backup: ' + error.message); return; }
+  const url = URL.createObjectURL(data);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderDataManagement() {
   return `
     <div class="mb-8">
       <h1 class="text-2xl font-bold text-slate-900">Backup & Data Management</h1>
       <p class="text-slate-500 text-sm mt-1">Export, import, and back up your data</p>
+    </div>
+
+    <div class="card p-6 mb-6 border-l-4" style="border-left-color:#16a34a">
+      <div class="flex justify-between items-start flex-wrap gap-3">
+        <div>
+          <h2 class="font-semibold text-lg mb-1">Automatic Daily Cloud Backup</h2>
+          <p class="text-sm text-slate-500">A full backup is saved to secure cloud storage once a day, automatically, whenever an administrator uses the app. The last 30 days are kept.</p>
+        </div>
+        <button id="cloud-backup-now" onclick="manualCloudBackup()" class="btn-primary">Back Up Now</button>
+      </div>
+      <div id="cloud-backup-list" class="mt-4 text-sm text-slate-500">Loading backups...</div>
     </div>
 
     <div class="grid grid-cols-2 gap-6">
@@ -4391,9 +4507,9 @@ function renderDataManagement() {
       </div>
     </div>
 
-    <div class="card p-6 mt-6 bg-amber-50 border-amber-200">
-      <h3 class="font-semibold text-amber-900">Backup Recommendation</h3>
-      <p class="text-sm text-amber-900 mt-2">All data is stored in your browser. If browser data is cleared, lost, or corrupted, you will lose everything. <strong>Create a backup at least weekly</strong> and store the JSON file in cloud storage (Google Drive, Dropbox) or email it to yourself.</p>
+    <div class="card p-6 mt-6 bg-blue-50 border-blue-200">
+      <h3 class="font-semibold text-blue-900">How your data is protected</h3>
+      <p class="text-sm text-blue-900 mt-2">Your data lives in the cloud database, and a daily snapshot is saved automatically to cloud storage (see above). For extra safety, occasionally download a backup file from the list and keep it somewhere separate (Google Drive, a USB drive, or email it to yourself).</p>
     </div>
 
     <div class="card p-6 mt-6">
@@ -6081,6 +6197,65 @@ function subscribeToNotifications() {
     })
     .subscribe();
 }
+
+// =====================================================
+// LIVE DATA REFRESH
+// Keeps every open device in sync: changes made by other staff (or new
+// online applications) appear without a manual reload. Uses realtime
+// events where the database publishes them, plus a gentle poll as a
+// safety net.
+// =====================================================
+const LIVE_TABLES = { clients: 'clients', loans: 'loans', payments: 'payments', loan_applications: 'applications', client_links: 'clientLinks', products: 'products' };
+
+function subscribeToDataChanges() {
+  if (!state.currentUser) return;
+  if (window._dataChannel) {
+    db.removeChannel(window._dataChannel);
+    window._dataChannel = null;
+  }
+  let ch = db.channel('data-sync');
+  Object.keys(LIVE_TABLES).forEach(t => {
+    ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => queueDataRefresh(LIVE_TABLES[t]));
+  });
+  window._dataChannel = ch.subscribe();
+}
+
+window._pendingRefresh = new Set();
+function queueDataRefresh(name) {
+  window._pendingRefresh.add(name);
+  clearTimeout(window._refreshTimer);
+  window._refreshTimer = setTimeout(async () => {
+    const names = [...window._pendingRefresh];
+    window._pendingRefresh.clear();
+    for (const n of names) await saveTable(n);
+    refreshViewIfIdle();
+  }, 700);
+}
+
+// Redraw the current view, but never while the user is in a modal or
+// typing — a redraw there would throw away their work.
+function refreshViewIfIdle() {
+  if (!state.currentUser) return;
+  const modalOpen = !!document.getElementById('modal-container')?.innerHTML.trim() ||
+                    !!document.getElementById('confirm-container');
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  if (modalOpen || typing) return;
+  render();
+  buildNav();
+}
+
+// Safety-net poll: every 90 seconds (only while the tab is visible),
+// quietly reload the fast-moving tables in case a realtime event was missed.
+setInterval(async () => {
+  if (!state.currentUser || document.hidden) return;
+  try {
+    await saveTable('applications');
+    await saveTable('loans');
+    await saveTable('payments');
+    await saveTable('clients');
+    refreshViewIfIdle();
+  } catch (e) { /* offline — try again next round */ }
+}, 90000);
 
 function unreadNotifications() {
   return state.notifications.filter(n => !n.readAt);
@@ -7811,6 +7986,8 @@ function deleteBankStatement(stId) {
     await loadData();
     await loadNotifications();
     subscribeToNotifications();
+    subscribeToDataChanges();
+    maybeAutoBackup();
   }
   renderApp();
 })();
