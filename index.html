@@ -6774,6 +6774,7 @@ function openApplicationReview(appId) {
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex flex-wrap justify-end gap-2 sticky bottom-0 bg-white rounded-b-xl">
           ${app.status === 'Pending' ? `
+            ${applicationMissingDocs(app).length ? `<button onclick="requestMissingApplicationDocs('${app.id}')" class="btn-secondary">Request Missing Docs</button>` : ''}
             <button onclick="openRejectApplication('${app.id}')" class="btn-secondary text-red-700">Reject...</button>
             <button onclick="approveApplication('${app.id}')" class="btn-primary bg-green-700 hover:bg-green-800">Approve &amp; Create Client</button>
           ` : ''}
@@ -6960,6 +6961,23 @@ function applicationMissingDocs(app) {
   const pages = app.documentPages || {};
   const urlMap = { selfie: app.selfieUrl, id_front: app.idFrontUrl, id_back: app.idBackUrl, income_document: app.incomeDocumentUrl, bank_statement: app.bankStatementUrl };
   return APPLY_DOC_TYPES.filter(d => [urlMap[d.key], ...(pages[d.key] || [])].filter(u => u).length === 0).map(d => d.label);
+}
+
+function requestMissingApplicationDocs(appId) {
+  const app = (state.applications || []).find(a => a.id === appId);
+  if (!app) return;
+  const missing = applicationMissingDocs(app);
+  if (!missing.length) return;
+  const firstName = (app.fullName || '').split(' ')[0];
+  const message =
+    `Hello ${firstName},\n\n` +
+    `Thank you for your loan application to GPL Finance (Ref: ${applicationRef(app)}).\n\n` +
+    `To continue processing it, we still need the following document${missing.length > 1 ? 's' : ''}:\n` +
+    missing.map(m => `• ${m}`).join('\n') + `\n\n` +
+    `Please reply to this message with clear photos. Your application remains open — no need to apply again.\n\n` +
+    `Kind regards,\nGPL Finance`;
+  logAudit('request_docs', 'application', appId, { missing });
+  openWhatsApp(app.phone, message);
 }
 
 function openRejectApplication(appId) {
