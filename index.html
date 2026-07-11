@@ -6392,6 +6392,53 @@ function applicationRepayDate(app) {
   return app.repaymentDate || app.documentPages?._repayment_date || null;
 }
 
+// Matches an application to an existing client by ID number and sums up
+// what that client still owes, for the repeat-borrower warning.
+function applicationClientRisk(app) {
+  const idNum = (app.idNumber || '').trim();
+  if (!idNum) return null;
+  const client = state.clients.find(c => (c.idNumber || '').trim() === idNum);
+  if (!client) return null;
+  const openLoans = state.loans.filter(l => l.clientId === client.id && l.status !== 'Completed' && l.status !== 'Written Off');
+  const today_ = today();
+  let arrears = 0, oldestDays = 0;
+  openLoans.forEach(l => ensureSchedule(l).forEach(s => {
+    const bal = s.amountDue - s.amountPaid;
+    if (bal > 0.01 && s.dueDate < today_) {
+      arrears += bal;
+      oldestDays = Math.max(oldestDays, daysBetween(s.dueDate, today_));
+    }
+  }));
+  const outstanding = openLoans.reduce((s, l) => s + loanOutstanding(l.id), 0);
+  const badHistory = state.loans.some(l => l.clientId === client.id && (l.status === 'Defaulted' || l.status === 'Written Off'));
+  return { client, outstanding, arrears, oldestDays, badHistory, openLoanCount: openLoans.length };
+}
+
+function applicationRiskBanner(app) {
+  if (app.status !== 'Pending') return '';
+  const risk = applicationClientRisk(app);
+  if (!risk) return '';
+  const viewBtn = `<button onclick="closeModal(); openClientDetail('${risk.client.id}')" class="underline font-medium">View client record</button>`;
+  if (risk.arrears > 0.01 || risk.badHistory) {
+    return `
+      <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-900">
+        <strong>⚠ Repeat borrower with arrears.</strong> This ID number belongs to existing client <strong>${escapeHtml(risk.client.fullName)}</strong>${risk.arrears > 0.01 ? `, who currently owes <strong>${fmt(risk.arrears)}</strong> in overdue instalments (oldest ${risk.oldestDays} day${risk.oldestDays === 1 ? '' : 's'} late)` : ''}${risk.badHistory ? `${risk.arrears > 0.01 ? ' and' : ','} has a defaulted or written-off loan on record` : ''}.
+        <div class="mt-1">${viewBtn}</div>
+      </div>`;
+  }
+  if (risk.outstanding > 0.01) {
+    return `
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+        <strong>Existing client with an active loan.</strong> This ID number belongs to <strong>${escapeHtml(risk.client.fullName)}</strong>, who has ${risk.openLoanCount} open loan${risk.openLoanCount === 1 ? '' : 's'} with <strong>${fmt(risk.outstanding)}</strong> outstanding (not overdue).
+        <div class="mt-1">${viewBtn}</div>
+      </div>`;
+  }
+  return `
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-900">
+      <strong>Returning client in good standing.</strong> This ID number belongs to <strong>${escapeHtml(risk.client.fullName)}</strong> — previous loans are settled. ${viewBtn}
+    </div>`;
+}
+
 // -----------------------------------------------------
 // PUBLIC APPLICATION FORM (?apply)
 // -----------------------------------------------------
@@ -6747,7 +6794,7 @@ function renderApplications() {
                 <tr class="border-b border-slate-100 hover:bg-slate-50">
                   <td class="px-4 py-3 whitespace-nowrap">${fmtDate(a.submittedAt)}</td>
                   <td class="px-4 py-3 font-mono text-xs">${applicationRef(a)}</td>
-                  <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(a.fullName)}</td>
+                  <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(a.fullName)}${(() => { const r = a.status === 'Pending' ? applicationClientRisk(a) : null; return r && (r.arrears > 0.01 || r.badHistory) ? ' <span style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:9999px; font-size:10px; font-weight:600; padding:2px 8px; white-space:nowrap;">⚠ arrears</span>' : ''; })()}</td>
                   <td class="px-4 py-3 font-mono text-xs">${escapeHtml(a.idNumber)}</td>
                   <td class="px-4 py-3">${escapeHtml(a.phone)}</td>
                   <td class="px-4 py-3">${a.amountRequested ? fmt(a.amountRequested) : '—'}</td>
@@ -6832,6 +6879,8 @@ function openApplicationReview(appId) {
               <strong>Approved${reviewer ? ' by ' + escapeHtml(reviewer) : ''}${app.reviewedAt ? ' on ' + fmtDate(app.reviewedAt) : ''}.</strong>
               ${linkedClient ? `<div class="mt-1">Client record: <button onclick="closeModal(); openClientDetail('${linkedClient.id}')" class="underline font-medium">${escapeHtml(linkedClient.fullName)}</button></div>` : ''}
             </div>` : ''}
+
+          ${applicationRiskBanner(app)}
 
           <div class="space-y-4">
             <h3 class="font-semibold text-slate-900">Documents</h3>
@@ -6982,8 +7031,12 @@ async function approveApplication(appId) {
   };
 
   if (existing) {
+    const risk = applicationClientRisk(app);
+    const arrearsWarning = risk && (risk.arrears > 0.01 || risk.badHistory)
+      ? `\n\n⚠ WARNING: ${risk.arrears > 0.01 ? `This client currently owes ${fmt(risk.arrears)} in overdue instalments (oldest ${risk.oldestDays} day(s) late).` : ''}${risk.badHistory ? ' This client has a defaulted or written-off loan on record.' : ''}`
+      : '';
     confirmAction(
-      `A client with ID ${app.idNumber} already exists: ${existing.fullName}.\n\nApprove and link this application to the existing client? (The existing client's documents will not be changed — the application documents remain viewable here.)`,
+      `A client with ID ${app.idNumber} already exists: ${existing.fullName}.${arrearsWarning}\n\nApprove and link this application to the existing client? (The existing client's documents will not be changed — the application documents remain viewable here.)`,
       () => finalize(existing.id, false),
       'Link to Existing Client',
       'bg-green-700 hover:bg-green-800'
