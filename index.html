@@ -1277,7 +1277,18 @@ function openLoanForm(editId, preselectClientId) {
               <option value="Written Off" ${editing.status==='Written Off'?'selected':''}>Written Off</option>
             </select></div>` : ''}
           </div>
-          <div><label>Purpose</label><input type="text" id="f-purpose" value="${escapeHtml(editing?.purpose || '')}" placeholder="e.g. Business expansion, school fees"></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label>Disbursement Method</label>
+              <select id="f-disbMethod" onchange="updateLoanCalc()">
+                <option value="Bank Transfer (EFT)" ${loanFormDisbMethod(editing) !== 'eWallet' && loanFormDisbMethod(editing) !== 'Cash' ? 'selected' : ''}>Bank Transfer (EFT)</option>
+                <option value="eWallet" ${loanFormDisbMethod(editing) === 'eWallet' ? 'selected' : ''}>eWallet (+${fmt(EWALLET_FEE)} fee)</option>
+                <option value="Cash" ${loanFormDisbMethod(editing) === 'Cash' ? 'selected' : ''}>Cash</option>
+              </select>
+              <div id="disb-method-hint" class="text-xs text-slate-500 mt-1"></div>
+            </div>
+            <div><label>Purpose</label><input type="text" id="f-purpose" value="${escapeHtml(stripDisbMarker(editing?.purpose || ''))}" placeholder="e.g. Business expansion, school fees"></div>
+          </div>
           <div class="bg-slate-50 rounded-lg p-4 grid grid-cols-3 gap-4">
             <div><div class="text-xs text-slate-500 uppercase">Total Repayable</div><div id="calc-total" class="text-xl font-bold text-slate-900">N$ 0.00</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Monthly Installment</div><div id="calc-monthly" class="text-xl font-bold text-blue-700">N$ 0.00</div></div>
@@ -1304,6 +1315,7 @@ function openLoanForm(editId, preselectClientId) {
     prefillFirstPaymentFromApplication(preselectClientId || '');
     if (preselectClientId) {
       prefillPrincipalFromApplication(preselectClientId);
+      prefillDisbMethodFromApplication(preselectClientId);
       showTopUpSuggestion(preselectClientId);
     }
   }
@@ -1340,7 +1352,21 @@ function selectLoanClient(clientId) {
   showKycWarningForClient(clientId);
   prefillFirstPaymentFromApplication(clientId);
   prefillPrincipalFromApplication(clientId);
+  prefillDisbMethodFromApplication(clientId);
   showTopUpSuggestion(clientId);
+}
+
+// Pre-select the payout method the client chose on their application
+function prefillDisbMethodFromApplication(clientId) {
+  const el = document.getElementById('f-disbMethod');
+  if (!el) return;
+  const apps = (state.applications || []).filter(a => a.clientId === clientId && applicationDisbMethod(a));
+  if (apps.length) {
+    apps.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+    const m = applicationDisbMethod(apps[0]);
+    if (['eWallet', 'Bank Transfer (EFT)', 'Cash'].includes(m)) el.value = m;
+  }
+  updateLoanCalc();
 }
 
 function clientActiveLoans(clientId) {
@@ -1415,15 +1441,43 @@ function syncFirstPaymentDefault() {
   el.value = defaultFirstPaymentDate(disb);
 }
 
+// eWallet payouts cost N$20, passed on to the client in the repayment.
+const EWALLET_FEE = 20;
+const EWALLET_MARKER = ' · Disbursed via eWallet (incl. N$20 eWallet fee)';
+
+function stripDisbMarker(purpose) {
+  return (purpose || '').replace(EWALLET_MARKER, '');
+}
+
+function loanEwalletFee(loan) {
+  return (loan?.purpose || '').includes('eWallet fee') ? EWALLET_FEE : 0;
+}
+
+function loanFormDisbMethod(editing) {
+  if (!editing) return 'Bank Transfer (EFT)';
+  return loanEwalletFee(editing) ? 'eWallet' : 'Bank Transfer (EFT)';
+}
+
+function loanFormFeeTotals(p, r, t) {
+  const { totalRepayable, monthlyInstallment } = calcLoan(p, r, t);
+  const method = document.getElementById('f-disbMethod')?.value || 'Bank Transfer (EFT)';
+  const fee = method === 'eWallet' ? EWALLET_FEE : 0;
+  const total = Math.round((totalRepayable + fee) * 100) / 100;
+  const monthly = Math.round((total / t) * 100) / 100;
+  return { totalRepayable: total, monthlyInstallment: monthly, fee, method };
+}
+
 function updateLoanCalc() {
   const p = parseFloat(document.getElementById('f-principal').value) || 0;
   const r = parseFloat(document.getElementById('f-rate').value) || 0;
   const t = parseInt(document.getElementById('f-term').value) || 1;
-  const { totalRepayable, monthlyInstallment } = calcLoan(p, r, t);
+  const { totalRepayable, monthlyInstallment, fee } = loanFormFeeTotals(p, r, t);
   document.getElementById('calc-total').textContent = fmt(totalRepayable);
   document.getElementById('calc-monthly').textContent = fmt(monthlyInstallment);
   const apr = calculateAPR(p, monthlyInstallment, t);
   document.getElementById('calc-apr').textContent = apr.toFixed(2) + '%';
+  const hint = document.getElementById('disb-method-hint');
+  if (hint) hint.textContent = fee ? `Includes ${fmt(fee)} eWallet fee in the total repayable.` : '';
 }
 
 async function saveLoan(editId) {
@@ -1468,7 +1522,8 @@ async function saveLoan(editId) {
     }
   }
 
-  const { totalRepayable, monthlyInstallment } = calcLoan(principal, rate, term);
+  const { totalRepayable, monthlyInstallment, method } = loanFormFeeTotals(principal, rate, term);
+  const purposeFinal = stripDisbMarker(purpose) + (method === 'eWallet' ? EWALLET_MARKER : '');
   const matDate = new Date(disbDate);
   matDate.setMonth(matDate.getMonth() + term);
   const maturityDate = matDate.toISOString().split('T')[0];
@@ -1479,7 +1534,7 @@ async function saveLoan(editId) {
     const record = {
       principal, interest_rate: rate, term_months: term,
       disbursement_date: disbDate, maturity_date: maturityDate,
-      total_repayable: totalRepayable, monthly_installment: monthlyInstallment, purpose
+      total_repayable: totalRepayable, monthly_installment: monthlyInstallment, purpose: purposeFinal
     };
     if (statusEl) record.status = statusEl.value;
     // Regenerate schedule if core terms or the first payment date changed
@@ -1498,7 +1553,7 @@ async function saveLoan(editId) {
       principal, interest_rate: rate, term_months: term,
       disbursement_date: disbDate, maturity_date: maturityDate,
       total_repayable: totalRepayable, monthly_installment: monthlyInstallment,
-      status: 'Active', purpose,
+      status: 'Active', purpose: purposeFinal,
       created_by: state.currentUser?.id || null
     };
     record.schedule = generateSchedule({ ...record, disbursementDate: disbDate, firstPaymentDate: firstPayDate, termMonths: term, totalRepayable, monthlyInstallment });
@@ -3085,7 +3140,8 @@ function generateLoanAgreement(loanId) {
   const s = state.settings || {};
   const schedule = ensureSchedule(loan);
   const apr = calculateAPR(loan.principal, loan.monthlyInstallment, loan.termMonths);
-  const financeCharge = loan.totalRepayable - loan.principal;
+  const pdfEwalletFee = loanEwalletFee(loan);
+  const financeCharge = loan.totalRepayable - loan.principal - pdfEwalletFee;
   const flatRate = loan.interestRate;
 
   const { jsPDF } = window.jspdf;
@@ -3138,6 +3194,7 @@ function generateLoanAgreement(loanId) {
     body: [
       ['Principal Amount (capital advanced)', fmt(loan.principal)],
       ['Finance Charge (interest)', fmt(financeCharge)],
+      ...(pdfEwalletFee ? [['eWallet Disbursement Fee', fmt(pdfEwalletFee)]] : []),
       ['Total Cost of Credit', fmt(loan.totalRepayable)],
       ['Flat Interest Rate', `${flatRate}% over ${loan.termMonths} months`],
       ['Annual Percentage Rate (APR)', `${apr.toFixed(2)}% per annum`],
@@ -7009,6 +7066,14 @@ function applicationRepayDate(app) {
   return app.repaymentDate || app.documentPages?._repayment_date || null;
 }
 
+function applicationDisbMethod(app) {
+  return app.documentPages?._disbursement_method || null;
+}
+
+function applicationRepayMethod(app) {
+  return app.documentPages?._repayment_method || null;
+}
+
 // Matches an application to an existing client by ID number and sums up
 // what that client still owes, for the repeat-borrower warning.
 function applicationClientRisk(app) {
@@ -7105,6 +7170,24 @@ function renderApplyPage() {
           <label>Repayment Date — your next payday <span class="text-red-600">*</span></label>
           <input type="date" id="app-repaymentDate" min="${applyRepayMinDate()}" max="${applyRepayMaxDate()}">
           <div class="text-xs text-slate-500 mt-1">Choose the day you get paid. It must be within one month from today, as we offer payday loans.</div>
+        </div>
+        <div>
+          <label>How would you like to receive the money? <span class="text-red-600">*</span></label>
+          <select id="app-disbMethod" onchange="updateApplySubmitState()">
+            <option value="">Select...</option>
+            <option value="Bank Transfer (EFT)">Bank Transfer (EFT)</option>
+            <option value="eWallet">eWallet</option>
+          </select>
+          <div class="text-xs text-slate-500 mt-1">eWallet payouts carry a N$20 fee, added to your repayment amount.</div>
+        </div>
+        <div>
+          <label>How will you repay the loan? <span class="text-red-600">*</span></label>
+          <select id="app-repayMethod" onchange="updateApplySubmitState()">
+            <option value="">Select...</option>
+            <option value="Debit Order">Debit Order</option>
+            <option value="EFT / Bank Transfer">EFT / Bank Transfer</option>
+            <option value="eWallet">eWallet</option>
+          </select>
         </div>
       </div>
 
@@ -7225,12 +7308,16 @@ function updateApplySubmitState() {
   const phone = (document.getElementById('app-phone')?.value || '').trim();
   const consent = document.getElementById('app-consent')?.checked;
   const repayDate = (document.getElementById('app-repaymentDate')?.value || '').trim();
+  const disbMethod = document.getElementById('app-disbMethod')?.value || '';
+  const repayMethod = document.getElementById('app-repayMethod')?.value || '';
   const problems = [];
   if (!name) problems.push('full name');
   if (!idNum) problems.push('ID number');
   if (!phone) problems.push('WhatsApp number');
   const repayProblem = applyRepayDateProblem(repayDate);
   if (repayProblem) problems.push(repayProblem);
+  if (!disbMethod) problems.push('how to receive the money');
+  if (!repayMethod) problems.push('repayment method');
   if (!consent) problems.push('consent tick');
   btn.disabled = problems.length > 0;
   if (hint) hint.textContent = problems.length ? 'Still needed: ' + problems.join('; ') : 'Ready to submit ✓';
@@ -7244,9 +7331,12 @@ async function submitApplication() {
   const phoneRaw = '+264' + phoneDigits;
   const amount = parseFloat(document.getElementById('app-amount').value) || null;
   const repaymentDate = document.getElementById('app-repaymentDate').value;
+  const disbMethod = document.getElementById('app-disbMethod').value;
+  const repayMethod = document.getElementById('app-repayMethod').value;
   if (!/^\d{9,13}$/.test(idNum)) { alert('Please check your ID number — it should be the digits on your Namibian ID.'); return; }
   if (phoneDigits.length < 7 || phoneDigits.length > 9) { alert('Please check your mobile number — enter it without the first 0, for example 81 234 5678.'); return; }
   if (applyRepayDateProblem(repaymentDate)) { alert('Please choose your repayment date — the day you get paid. It must be within one month from today.'); return; }
+  if (!disbMethod || !repayMethod) { alert('Please choose how you would like to receive the money and how you will repay.'); return; }
 
   btn.disabled = true;
   // Keep the same application ID and completed-upload record across retries,
@@ -7263,7 +7353,7 @@ async function submitApplication() {
     phone: phoneRaw,
     amount_requested: amount,
     status: 'Pending',
-    document_pages: { _repayment_date: repaymentDate }
+    document_pages: { _repayment_date: repaymentDate, _disbursement_method: disbMethod, _repayment_method: repayMethod }
   };
   const urlMap = { selfie: 'selfie_url', id_front: 'id_front_url', id_back: 'id_back_url', income_document: 'income_document_url', bank_statement: 'bank_statement_url' };
   const totalFiles = APPLY_DOC_TYPES.reduce((s, d) => s + (window._applyUploads[d.key] || []).length, 0);
@@ -7482,6 +7572,8 @@ function openApplicationReview(appId) {
             <div><div class="text-xs text-slate-500 uppercase">WhatsApp</div><div class="font-medium mt-1">${escapeHtml(app.phone)}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Requested</div><div class="font-medium mt-1">${app.amountRequested ? fmt(app.amountRequested) : '—'}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Repayment Date (payday)</div><div class="font-medium mt-1">${applicationRepayDate(app) ? fmtDate(applicationRepayDate(app)) : '—'}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Receive Money Via</div><div class="font-medium mt-1">${escapeHtml(applicationDisbMethod(app) || '—')}${applicationDisbMethod(app) === 'eWallet' ? ' <span class="text-xs text-amber-700">(+N$20 fee)</span>' : ''}</div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Repay Via</div><div class="font-medium mt-1">${escapeHtml(applicationRepayMethod(app) || '—')}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Submitted</div><div class="font-medium mt-1">${fmtDate(app.submittedAt)}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Status</div><div class="font-medium mt-1">${escapeHtml(app.status)}</div></div>
           </div>
