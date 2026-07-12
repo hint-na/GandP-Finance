@@ -1255,6 +1255,7 @@ function openLoanForm(editId, preselectClientId) {
             </div>
             ${editing ? '<div class="text-xs text-slate-500 mt-1">Client cannot be changed on existing loans</div>' : ''}
             <div id="kyc-warning-box" class="mt-2"></div>
+            <div id="topup-suggestion" class="mt-2"></div>
           </div>
           <div class="grid grid-cols-3 gap-4">
             <div><label>Principal (N$) *</label><input type="number" id="f-principal" min="1" step="0.01" value="${editing?.principal || ''}" oninput="updateLoanCalc()" required></div>
@@ -1301,7 +1302,10 @@ function openLoanForm(editId, preselectClientId) {
   if (!editing) {
     document.getElementById('f-firstPayDate').value = defaultFirstPaymentDate(today());
     prefillFirstPaymentFromApplication(preselectClientId || '');
-    if (preselectClientId) prefillPrincipalFromApplication(preselectClientId);
+    if (preselectClientId) {
+      prefillPrincipalFromApplication(preselectClientId);
+      showTopUpSuggestion(preselectClientId);
+    }
   }
   if (!editing && preselectClientId) setTimeout(() => showKycWarningForClient(preselectClientId), 50);
 }
@@ -1336,6 +1340,27 @@ function selectLoanClient(clientId) {
   showKycWarningForClient(clientId);
   prefillFirstPaymentFromApplication(clientId);
   prefillPrincipalFromApplication(clientId);
+  showTopUpSuggestion(clientId);
+}
+
+function clientActiveLoans(clientId) {
+  return state.loans.filter(l => l.clientId === clientId && l.status === 'Active' && loanOutstanding(l.id) > 0.01);
+}
+
+// Company practice: a client with a running loan gets a top-up
+// (refinance), not a second parallel loan.
+function showTopUpSuggestion(clientId) {
+  const box = document.getElementById('topup-suggestion');
+  if (!box) return;
+  const active = clientId ? clientActiveLoans(clientId) : [];
+  if (!active.length) { box.innerHTML = ''; return; }
+  const l = active[0];
+  box.innerHTML = `
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+      <strong>This client already has an active loan</strong> — ${loanRef(l)} with ${fmt(loanOutstanding(l.id))} outstanding.
+      Standard practice is a <strong>Top-Up</strong>: the old loan is settled and the client keeps one loan and one instalment.
+      <div class="mt-2"><button onclick="closeModal(); openTopUpForm('${l.id}')" class="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded font-medium">Top Up ${loanRef(l)} Instead</button></div>
+    </div>`;
 }
 
 // Suggest the amount the client asked for on their most recent application
@@ -1413,6 +1438,22 @@ async function saveLoan(editId) {
   const productId = productEl ? productEl.value : '';
   if (!clientId) { showAlert('Please choose a client — type to search, then tap the client in the list.'); return; }
   if (!principal || !rate || !term || !disbDate || !firstPayDate) { showAlert('Please fill all required fields.'); return; }
+  // Company practice: top up an existing active loan rather than
+  // running a second loan in parallel. Allow it only after an
+  // explicit confirmation.
+  if (!editId && !window._allowSecondLoan) {
+    const active = clientActiveLoans(clientId);
+    if (active.length) {
+      const l0 = active[0];
+      confirmAction(
+        `This client already has an active loan ${loanRef(l0)} with ${fmt(loanOutstanding(l0.id))} outstanding.\n\nStandard practice is a Top-Up: the old loan is settled and the client keeps one loan and one instalment. Use the Top Up button on ${loanRef(l0)} instead.\n\nCreate a separate second loan anyway?`,
+        async () => { window._allowSecondLoan = true; try { await saveLoan(editId); } finally { window._allowSecondLoan = false; } },
+        'Create Second Loan',
+        'bg-amber-600 hover:bg-amber-700'
+      );
+      return;
+    }
+  }
   if (firstPayDate <= disbDate) { showAlert('The first payment date must be after the disbursement date.'); return; }
   const latestFirstPay = new Date(disbDate); latestFirstPay.setMonth(latestFirstPay.getMonth() + 2);
   if (firstPayDate > latestFirstPay.toISOString().split('T')[0]) { showAlert('The first payment date should be within two months of disbursement. Please check the date.'); return; }
