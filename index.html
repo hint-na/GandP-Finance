@@ -1471,6 +1471,140 @@ async function saveLoan(editId) {
   render();
 }
 
+// =====================================================
+// TOP-UP REFINANCE
+// The client's old loan is settled from the proceeds of a new, larger
+// loan: new principal = old outstanding balance + extra cash paid out.
+// One new agreement, one instalment; the old loan closes cleanly.
+// =====================================================
+function openTopUpForm(loanId) {
+  if (!requirePerm('create', 'loans')) return;
+  const loan = state.loans.find(l => l.id === loanId);
+  if (!loan) return;
+  const client = state.clients.find(c => c.id === loan.clientId);
+  const outstanding = loanOutstanding(loanId);
+  if (outstanding <= 0.01) { showAlert('This loan has no outstanding balance to top up.'); return; }
+  const payday = nextClientPayday(loan.clientId) || defaultFirstPaymentDate(today());
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Top Up Loan ${loanRef(loan)}</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="bg-slate-50 rounded-lg p-4 text-sm">
+            <div class="flex justify-between"><span class="text-slate-600">Client</span><span class="font-medium">${escapeHtml(client?.fullName || '—')}</span></div>
+            <div class="flex justify-between mt-1"><span class="text-slate-600">Outstanding on ${loanRef(loan)}</span><span class="font-medium">${fmt(outstanding)}</span></div>
+          </div>
+          <div>
+            <label>Extra Cash to Pay Out (N$) *</label>
+            <input type="number" id="tu-cash" min="1" step="0.01" oninput="updateTopUpCalc('${loanId}')" placeholder="e.g. 2000">
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label>Interest Rate (%) *</label><input type="number" id="tu-rate" min="0" step="0.1" value="${loan.interestRate || state.settings?.defaultRate || 20}" oninput="updateTopUpCalc('${loanId}')"></div>
+            <div><label>Term (months) *</label><input type="number" id="tu-term" min="1" value="${loan.termMonths || state.settings?.defaultTerm || 1}" oninput="updateTopUpCalc('${loanId}')"></div>
+          </div>
+          <div>
+            <label>First Payment Date (client's payday) *</label>
+            <input type="date" id="tu-firstPay" value="${payday}">
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-1">
+            <div class="flex justify-between"><span class="text-blue-900">Settles old loan</span><span class="font-medium" id="tu-settle">${fmt(outstanding)}</span></div>
+            <div class="flex justify-between"><span class="text-blue-900">Cash to client</span><span class="font-medium" id="tu-cashout">${fmt(0)}</span></div>
+            <div class="flex justify-between border-t border-blue-200 pt-1 mt-1"><span class="text-blue-900 font-medium">New loan principal</span><span class="font-bold" id="tu-principal">${fmt(outstanding)}</span></div>
+            <div class="flex justify-between"><span class="text-blue-900">Total repayable</span><span class="font-medium" id="tu-total">—</span></div>
+            <div class="flex justify-between"><span class="text-blue-900">Monthly instalment</span><span class="font-medium" id="tu-monthly">—</span></div>
+          </div>
+          <div class="text-xs text-slate-500">The old loan is closed with a "Top-Up Settlement" record — no new interest is charged on it. The client signs a fresh agreement for the new loan.</div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="confirmTopUp('${loanId}')" class="btn-primary bg-amber-600 hover:bg-amber-700">Create Top-Up Loan</button>
+        </div>
+      </div>
+    </div>
+  `;
+  updateTopUpCalc(loanId);
+}
+
+function updateTopUpCalc(loanId) {
+  const outstanding = loanOutstanding(loanId);
+  const cash = parseFloat(document.getElementById('tu-cash')?.value) || 0;
+  const rate = parseFloat(document.getElementById('tu-rate')?.value) || 0;
+  const term = parseInt(document.getElementById('tu-term')?.value) || 1;
+  const principal = Math.round((outstanding + cash) * 100) / 100;
+  const { totalRepayable, monthlyInstallment } = calcLoan(principal, rate, term);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('tu-cashout', fmt(cash));
+  set('tu-principal', fmt(principal));
+  set('tu-total', fmt(totalRepayable));
+  set('tu-monthly', fmt(monthlyInstallment));
+}
+
+async function confirmTopUp(loanId) {
+  const oldLoan = state.loans.find(l => l.id === loanId);
+  if (!oldLoan) return;
+  const outstanding = loanOutstanding(loanId);
+  const cash = parseFloat(document.getElementById('tu-cash').value);
+  const rate = parseFloat(document.getElementById('tu-rate').value);
+  const term = parseInt(document.getElementById('tu-term').value);
+  const firstPay = document.getElementById('tu-firstPay').value;
+  const disbDate = today();
+  if (!cash || cash <= 0) { showAlert('Please enter the extra cash amount to pay out.'); return; }
+  if (!rate || !term || !firstPay) { showAlert('Please fill all required fields.'); return; }
+  if (firstPay <= disbDate) { showAlert('The first payment date must be after today.'); return; }
+  const latestFirstPay = new Date(disbDate); latestFirstPay.setMonth(latestFirstPay.getMonth() + 2);
+  if (firstPay > latestFirstPay.toISOString().split('T')[0]) { showAlert('The first payment date should be within two months. Please check the date.'); return; }
+
+  const principal = Math.round((outstanding + cash) * 100) / 100;
+  const { totalRepayable, monthlyInstallment } = calcLoan(principal, rate, term);
+
+  // 1. Create the new combined loan
+  const record = {
+    client_id: oldLoan.clientId,
+    principal, interest_rate: rate, term_months: term,
+    disbursement_date: disbDate,
+    total_repayable: totalRepayable, monthly_installment: monthlyInstallment,
+    status: 'Active',
+    purpose: `Top-up refinance of ${loanRef(oldLoan)} — settles ${fmt(outstanding)}, pays out ${fmt(cash)} cash`,
+    created_by: state.currentUser?.id || null
+  };
+  record.schedule = generateSchedule({ ...record, disbursementDate: disbDate, firstPaymentDate: firstPay, termMonths: term, totalRepayable, monthlyInstallment });
+  record.maturity_date = record.schedule[record.schedule.length - 1].dueDate;
+  const { data: newLoan, error: loanErr } = await db.from('loans').insert(record).select().single();
+  if (loanErr) { showAlert('Could not create the top-up loan: ' + loanErr.message); return; }
+  await saveTable('loans');
+  const newRef = loanRef(snakeToCamel(newLoan));
+
+  // 2. Settle the old loan from the new loan's proceeds
+  const settlement = {
+    loan_id: loanId,
+    client_id: oldLoan.clientId,
+    payment_date: disbDate,
+    amount: outstanding,
+    method: 'Top-Up Settlement',
+    notes: `Settled by top-up loan ${newRef}`,
+    created_by: state.currentUser?.id || null
+  };
+  const { error: payErr } = await db.from('payments').insert(settlement);
+  if (payErr) { showAlert('The new loan was created, but settling the old one failed: ' + payErr.message + '\n\nPlease record a payment of ' + fmt(outstanding) + ' on ' + loanRef(oldLoan) + ' manually (method: Top-Up Settlement).'); return; }
+  await saveTable('payments');
+  allocatePayments(loanId);
+  const localOld = state.loans.find(l => l.id === loanId);
+  if (localOld) {
+    localOld.status = 'Completed';
+    await db.from('loans').update({ status: 'Completed', schedule: localOld.schedule }).eq('id', loanId);
+  }
+  await saveTable('loans');
+  await logAudit('topup', 'loan', newLoan.id, { oldLoanId: loanId, settled: outstanding, cashOut: cash, principal });
+
+  closeModal();
+  render();
+  showAlert(`Top-up complete.\n\n${loanRef(oldLoan)} settled (${fmt(outstanding)}) and closed.\nNew loan ${newRef} created for ${fmt(principal)} — pay out ${fmt(cash)} to the client and send the new agreement for signing.`, 'Top-Up Created');
+  setTimeout(() => openLoanDetail(newLoan.id), 300);
+}
+
 async function deleteLoan(loanId) {
   if (!requirePerm('delete','loans')) return;
   const loan = state.loans.find(l => l.id === loanId);
@@ -1512,6 +1646,7 @@ function openLoanDetail(loanId) {
             <button onclick="downloadLoanAgreement('${loan.id}')" class="btn-secondary text-sm flex items-center gap-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>${loan.signedAt ? 'Signed Agreement PDF' : 'Agreement PDF'}</button>
             <button onclick="sendLoanApprovalWhatsApp('${loan.id}')" class="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg font-medium flex items-center gap-1"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>Approval Message</button>
             ${!loan.signedAt ? `<button onclick="generateSignatureLink('${loan.id}')" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg font-medium">Send for e-Signature</button>` : ''}
+            ${loan.status === 'Active' && outstanding > 0.01 && can('create', 'loans') ? `<button onclick="openTopUpForm('${loan.id}')" class="text-sm bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-medium">Top Up...</button>` : ''}
             ${canEdit ? `<button onclick="openLoanForm('${loan.id}')" class="btn-secondary text-sm">Edit</button>` : ''}
             ${canDel ? `<button onclick="deleteLoan('${loan.id}')" class="text-sm text-red-600 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 font-medium">Delete</button>` : ''}
             <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 ml-2">✕</button>
