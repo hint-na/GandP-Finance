@@ -2056,6 +2056,7 @@ function openClientDetail(clientId) {
           </div>
 
           <div id="kyc-display-container" class="mb-6">${renderKycSection(c)}</div>
+          <div class="mb-6">${renderClientAiSection(c)}</div>
 
           <h3 class="font-semibold mb-3">Loan History</h3>
           ${loans.length === 0 ? '<div class="text-sm text-slate-500 p-4 text-center bg-slate-50 rounded-lg">No loans yet</div>' : `
@@ -7697,6 +7698,97 @@ function renderAiAnalysisSection(app) {
       <div class="text-xs text-slate-500">AI estimate based on the uploaded documents — verify key figures against the originals. The lending decision and NAMFISA affordability responsibility remain with you.</div>
     </div>
   `;
+}
+
+// -----------------------------------------------------
+// AI AFFORDABILITY ANALYSIS ON THE CLIENT RECORD
+// Same engine as the application version, but reads the client's own
+// KYC documents — so manually-added clients (or statements sent in
+// later via WhatsApp/upload links) can be analyzed too.
+// -----------------------------------------------------
+function clientStatementUrls(client) {
+  const pages = client.documentPages || {};
+  return [
+    client.bankStatementUrl, ...(pages.bank_statement || []),
+    client.incomeDocumentUrl, ...(pages.income_document || [])
+  ].filter(u => u);
+}
+
+function renderClientAiSection(client) {
+  const a = client.aiAnalysis;
+  if (!a) {
+    const hasDocs = clientStatementUrls(client).length > 0;
+    return `
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
+        <div class="flex justify-between items-center flex-wrap gap-3">
+          <div>
+            <div class="font-semibold text-slate-900 text-sm">AI Affordability Analysis</div>
+            <div class="text-xs text-slate-500 mt-1">Reads the bank statement and payslip on this client's file: income, existing debit orders, disposable income, and red flags.</div>
+          </div>
+          ${hasDocs
+            ? `<button id="client-ai-btn" onclick="analyzeClientStatement('${client.id}')" class="btn-primary text-sm">Analyze Statement with AI</button>`
+            : `<div class="text-xs text-slate-400">Upload a bank statement or payslip first (+ Upload for Client above)</div>`}
+        </div>
+      </div>
+    `;
+  }
+  const n = (v) => (v === null || v === undefined || isNaN(parseFloat(v))) ? '—' : fmt(parseFloat(v));
+  const flags = Array.isArray(a.red_flags) ? a.red_flags.filter(f => f) : [];
+  const commitments = Array.isArray(a.existing_commitments) ? a.existing_commitments : [];
+  return `
+    <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+      <div class="flex justify-between items-center flex-wrap gap-2">
+        <div class="font-semibold text-indigo-900 text-sm">AI Affordability Analysis <span class="font-normal text-xs text-indigo-700">· ${a.period_covered ? escapeHtml(a.period_covered) + ' · ' : ''}run ${client.analyzedAt ? fmtDate(client.analyzedAt) : ''}</span></div>
+        <button id="client-ai-btn" onclick="analyzeClientStatement('${client.id}')" class="btn-secondary text-xs">Re-analyze</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-white rounded-lg p-3 border border-indigo-100"><div class="text-xs text-slate-500 uppercase">Monthly Income</div><div class="font-bold text-slate-900 mt-1">${n(a.monthly_income_estimate)}</div><div class="text-xs text-slate-500">${a.income_regular === true ? '✓ Regular' : a.income_regular === false ? '⚠ Irregular' : ''}</div></div>
+        <div class="bg-white rounded-lg p-3 border border-indigo-100"><div class="text-xs text-slate-500 uppercase">Existing Commitments</div><div class="font-bold text-slate-900 mt-1">${n(a.total_monthly_commitments)}</div><div class="text-xs text-slate-500">${commitments.length} debit order(s)</div></div>
+        <div class="bg-white rounded-lg p-3 border border-indigo-100"><div class="text-xs text-slate-500 uppercase">Est. Disposable</div><div class="font-bold ${parseFloat(a.estimated_disposable_income) > 0 ? 'text-green-700' : 'text-red-700'} mt-1">${n(a.estimated_disposable_income)}</div><div class="text-xs text-slate-500">per month</div></div>
+        <div class="bg-white rounded-lg p-3 border border-indigo-100"><div class="text-xs text-slate-500 uppercase">Balances</div><div class="font-bold text-slate-900 mt-1">${n(a.average_balance)}</div><div class="text-xs text-slate-500">avg · lowest ${n(a.lowest_balance)}</div></div>
+      </div>
+      ${a.income_source ? `<div class="text-xs text-indigo-900"><strong>Income source:</strong> ${escapeHtml(a.income_source)}</div>` : ''}
+      ${commitments.length ? `<div class="text-xs text-indigo-900"><strong>Existing commitments:</strong> ${commitments.map(c => `${escapeHtml(c.description || '')} (${n(c.monthly_amount)}/mo)`).join(' · ')}</div>` : ''}
+      ${flags.length ? `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+          <div class="text-xs font-semibold text-red-900 mb-1">⚠ Red Flags</div>
+          <div class="text-xs text-red-900">${flags.map(f => '• ' + escapeHtml(f)).join('<br>')}</div>
+        </div>` : `<div class="text-xs text-green-800">✓ No red flags identified</div>`}
+      ${a.summary ? `<div class="text-sm text-slate-700 bg-white border border-indigo-100 rounded-lg p-3">${escapeHtml(a.summary)}</div>` : ''}
+      <div class="text-xs text-slate-500">AI estimate based on the uploaded documents — verify key figures against the originals. The lending decision and NAMFISA affordability responsibility remain with you.</div>
+    </div>
+  `;
+}
+
+async function analyzeClientStatement(clientId) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const urls = clientStatementUrls(client);
+  if (!urls.length) { showAlert('No bank statement or payslip on this client\'s file yet.'); return; }
+  const btn = document.getElementById('client-ai-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing — 30–90 seconds...'; }
+  try {
+    const { data: sessionData } = await db.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const resp = await fetch(ANALYZE_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': SUPABASE_KEY },
+      body: JSON.stringify({ urls, applicant_name: client.fullName, amount_requested: null })
+    });
+    const out = await resp.json();
+    if (!resp.ok) throw new Error(out.error || 'Analysis failed');
+    const { error } = await db.from('clients').update({ ai_analysis: out, analyzed_at: new Date().toISOString() }).eq('id', clientId);
+    if (error && /ai_analysis|analyzed_at/i.test(error.message)) {
+      throw new Error('The database needs a one-time update. Run this in the Supabase SQL Editor, then analyze again:\n\nalter table public.clients add column if not exists ai_analysis jsonb, add column if not exists analyzed_at timestamptz;');
+    }
+    if (error) throw new Error('Analysis done but could not be saved: ' + error.message);
+    await logAudit('analyze', 'client', clientId, { client: client.fullName });
+    await saveTable('clients');
+    openClientDetail(clientId);
+  } catch (e) {
+    showAlert('Analysis failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Analyze Statement with AI'; }
+  }
 }
 
 async function analyzeApplicationStatement(appId) {
