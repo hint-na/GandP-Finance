@@ -20,6 +20,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; }
+  /* ---- Phase 1: feedback & accessibility ---- */
+  #toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+  .toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; background: #0f172a; color: #fff; font-size: 14px; font-weight: 500; padding: 10px 18px; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.25); animation: toast-in 0.2s ease-out; max-width: 92vw; }
+  .toast.toast-error { background: #b91c1c; }
+  .toast-leaving { opacity: 0; transform: translateY(8px); transition: opacity 0.25s, transform 0.25s; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+  .field-error { border-color: #dc2626 !important; box-shadow: 0 0 0 1px #dc2626 !important; }
+  .field-error-msg { color: #b91c1c; font-size: 12px; margin-top: 4px; }
+  .skip-link { position: absolute; left: -9999px; top: 8px; z-index: 200; background: #1e40af; color: #fff; padding: 8px 16px; border-radius: 8px; font-weight: 600; }
+  .skip-link:focus { left: 8px; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #1e40af; outline-offset: 2px; }
+  button { min-height: 24px; min-width: 24px; }
+  #app-container .text-slate-400 { color: #64748b; }
   .nav-active { background: #1e40af; color: white; }
   .nav-inactive { color: #64748b; }
   .nav-inactive:hover { background: #f1f5f9; }
@@ -739,6 +753,52 @@ function closeConfirm() {
   if (c) c.remove();
 }
 
+// -----------------------------------------------------
+// NON-BLOCKING TOASTS — success/confirmation feedback that doesn't
+// interrupt. Announced to screen readers via aria-live.
+// -----------------------------------------------------
+function showToast(message, type = 'success') {
+  let box = document.getElementById('toast-container');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toast-container';
+    box.setAttribute('aria-live', 'polite');
+    document.body.appendChild(box);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast' + (type === 'error' ? ' toast-error' : '');
+  t.innerHTML = (type === 'error'
+    ? '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-width="2" d="M12 9v4m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>'
+    : '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>');
+  t.appendChild(document.createTextNode(message));
+  box.appendChild(t);
+  while (box.children.length > 3) box.removeChild(box.firstChild);
+  setTimeout(() => { t.classList.add('toast-leaving'); setTimeout(() => t.remove(), 300); }, 3200);
+}
+
+// -----------------------------------------------------
+// INLINE FIELD VALIDATION — errors appear under the field itself
+// instead of a blocking dialog.
+// -----------------------------------------------------
+function clearFieldErrors() {
+  document.querySelectorAll('.field-error-msg').forEach(e => e.remove());
+  document.querySelectorAll('.field-error').forEach(e => e.classList.remove('field-error'));
+}
+
+function fieldError(id, message) {
+  const el = document.getElementById(id);
+  if (!el) { showAlert(message); return; }
+  el.classList.add('field-error');
+  el.setAttribute('aria-invalid', 'true');
+  const msg = document.createElement('div');
+  msg.className = 'field-error-msg';
+  msg.setAttribute('role', 'alert');
+  msg.textContent = message;
+  el.insertAdjacentElement('afterend', msg);
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  try { el.focus({ preventScroll: true }); } catch (e) {}
+}
+
 function showAlert(message, title = 'Notice') {
   // A row-level security rejection almost always means the login died silently
   if (/row-level security/i.test(message || '')) {
@@ -936,6 +996,88 @@ function addPdfLogo(doc, s, pageW, y) {
     return y + h + 2;
   } catch (e) { return y; }
 }
+
+// -----------------------------------------------------
+// CENTRAL ACCESSIBILITY LAYER
+// One observer upgrades every dialog the app opens: dialog semantics,
+// focus capture and return, Escape to close, Tab kept inside. A second
+// pass links every visible label to its field for screen readers.
+// -----------------------------------------------------
+function associateLabels(root) {
+  (root || document).querySelectorAll('label:not([for])').forEach(l => {
+    if (l.querySelector('input, select, textarea')) return; // wrapping label — already associated
+    const field = l.parentElement && l.parentElement.querySelector('input[id], select[id], textarea[id]');
+    if (field) l.htmlFor = field.id;
+  });
+}
+
+function enhanceDialog(container) {
+  const dialog = container.firstElementChild;
+  if (!dialog || dialog.dataset.a11y) return;
+  dialog.dataset.a11y = '1';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  const heading = dialog.querySelector('h1, h2, h3');
+  if (heading) {
+    if (!heading.id) heading.id = 'dlg-' + Math.random().toString(36).slice(2, 8);
+    dialog.setAttribute('aria-labelledby', heading.id);
+  }
+  window._focusBeforeDialog = window._focusBeforeDialog || document.activeElement;
+  associateLabels(dialog);
+  const focusables = dialog.querySelectorAll('button, [href], input:not([type=hidden]), select, textarea');
+  const first = Array.from(focusables).find(el => !el.disabled && el.offsetParent !== null);
+  if (first && !dialog.contains(document.activeElement)) setTimeout(() => { try { first.focus(); } catch (e) {} }, 30);
+}
+
+function anyDialogOpen() {
+  return !!(document.getElementById('modal-container')?.firstElementChild || document.getElementById('confirm-container'));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Skip link for keyboard users
+  const skip = document.createElement('a');
+  skip.href = '#view-container';
+  skip.className = 'skip-link';
+  skip.textContent = 'Skip to main content';
+  document.body.insertBefore(skip, document.body.firstChild);
+  // Announce background data refreshes to assistive tech
+  const live = document.createElement('div');
+  live.id = 'live-region';
+  live.setAttribute('aria-live', 'polite');
+  live.style.cssText = 'position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden;';
+  document.body.appendChild(live);
+  // Upgrade dialogs as they appear; return focus when they close
+  const observer = new MutationObserver(() => {
+    const modal = document.getElementById('modal-container');
+    const confirmBox = document.getElementById('confirm-container');
+    if (confirmBox) enhanceDialog(confirmBox.parentElement === document.body ? confirmBox : confirmBox);
+    if (modal?.firstElementChild) enhanceDialog(modal);
+    if (!anyDialogOpen() && window._focusBeforeDialog) {
+      const el = window._focusBeforeDialog;
+      window._focusBeforeDialog = null;
+      if (el && document.contains(el)) { try { el.focus(); } catch (e) {} }
+    }
+    associateLabels(document.getElementById('view-container') || document);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' && e.key !== 'Tab') return;
+  if (e.key === 'Escape') {
+    if (document.getElementById('confirm-container')) { closeConfirm(); e.stopPropagation(); return; }
+    if (document.getElementById('modal-container')?.firstElementChild) { closeModal(); e.stopPropagation(); }
+    return;
+  }
+  // Keep Tab inside the topmost dialog
+  const top = document.getElementById('confirm-container') || (document.getElementById('modal-container')?.firstElementChild ? document.getElementById('modal-container') : null);
+  if (!top) return;
+  const focusables = Array.from(top.querySelectorAll('button, [href], input:not([type=hidden]), select, textarea')).filter(el => !el.disabled && el.offsetParent !== null);
+  if (!focusables.length) return;
+  const firstEl = focusables[0], lastEl = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === firstEl) { e.preventDefault(); lastEl.focus(); }
+  else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus(); }
+});
 
 function renderApp() {
   if (!state.currentUser) { renderLogin(); applyCompanyLogo(); return; }
@@ -1490,8 +1632,13 @@ async function saveLoan(editId) {
   const purpose = document.getElementById('f-purpose').value;
   const productEl = document.getElementById('f-productId');
   const productId = productEl ? productEl.value : '';
-  if (!clientId) { showAlert('Please choose a client — type to search, then tap the client in the list.'); return; }
-  if (!principal || !rate || !term || !disbDate || !firstPayDate) { showAlert('Please fill all required fields.'); return; }
+  clearFieldErrors();
+  if (!clientId) { fieldError('f-clientSearch', 'Choose a client — type to search, then tap a name in the list.'); return; }
+  if (!principal) { fieldError('f-principal', 'Enter the principal amount.'); return; }
+  if (!rate) { fieldError('f-rate', 'Enter the interest rate.'); return; }
+  if (!term) { fieldError('f-term', 'Enter the term in months.'); return; }
+  if (!disbDate) { fieldError('f-disbDate', 'Choose the disbursement date.'); return; }
+  if (!firstPayDate) { fieldError('f-firstPayDate', "Choose the first payment date — the client's payday."); return; }
   // Company practice: top up an existing active loan rather than
   // running a second loan in parallel. Allow it only after an
   // explicit confirmation.
@@ -1508,9 +1655,9 @@ async function saveLoan(editId) {
       return;
     }
   }
-  if (firstPayDate <= disbDate) { showAlert('The first payment date must be after the disbursement date.'); return; }
+  if (firstPayDate <= disbDate) { fieldError('f-firstPayDate', 'Must be after the disbursement date.'); return; }
   const latestFirstPay = new Date(disbDate); latestFirstPay.setMonth(latestFirstPay.getMonth() + 2);
-  if (firstPayDate > latestFirstPay.toISOString().split('T')[0]) { showAlert('The first payment date should be within two months of disbursement. Please check the date.'); return; }
+  if (firstPayDate > latestFirstPay.toISOString().split('T')[0]) { fieldError('f-firstPayDate', 'Should be within two months of disbursement — check the date.'); return; }
 
   if (productId) {
     const product = state.products.find(p => p.id === productId);
@@ -1647,11 +1794,14 @@ async function confirmTopUp(loanId) {
   const term = parseInt(document.getElementById('tu-term').value);
   const firstPay = document.getElementById('tu-firstPay').value;
   const disbDate = today();
-  if (!cash || cash <= 0) { showAlert('Please enter the extra cash amount to pay out.'); return; }
-  if (!rate || !term || !firstPay) { showAlert('Please fill all required fields.'); return; }
-  if (firstPay <= disbDate) { showAlert('The first payment date must be after today.'); return; }
+  clearFieldErrors();
+  if (!cash || cash <= 0) { fieldError('tu-cash', 'Enter the extra cash amount to pay out.'); return; }
+  if (!rate) { fieldError('tu-rate', 'Enter the interest rate.'); return; }
+  if (!term) { fieldError('tu-term', 'Enter the term in months.'); return; }
+  if (!firstPay) { fieldError('tu-firstPay', "Choose the first payment date — the client's payday."); return; }
+  if (firstPay <= disbDate) { fieldError('tu-firstPay', 'Must be after today.'); return; }
   const latestFirstPay = new Date(disbDate); latestFirstPay.setMonth(latestFirstPay.getMonth() + 2);
-  if (firstPay > latestFirstPay.toISOString().split('T')[0]) { showAlert('The first payment date should be within two months. Please check the date.'); return; }
+  if (firstPay > latestFirstPay.toISOString().split('T')[0]) { fieldError('tu-firstPay', 'Should be within two months — check the date.'); return; }
 
   const principal = Math.round((outstanding + cash) * 100) / 100;
   const { totalRepayable, monthlyInstallment } = calcLoan(principal, rate, term);
@@ -1963,12 +2113,15 @@ async function saveClient(editId) {
   const fullName = document.getElementById('c-fullName').value.trim();
   const idNumber = document.getElementById('c-idNumber').value.trim();
   const phoneDigits = namibianDigits(document.getElementById('c-phone').value);
-  if (!fullName || !idNumber || !phoneDigits) { showAlert('Full name, ID number and phone are required.'); return; }
-  if (phoneDigits.length < 7) { showAlert('Please check the phone number — it looks too short. Enter the number without the leading 0 (e.g. 81 234 5678).'); return; }
+  clearFieldErrors();
+  if (!fullName) { fieldError('c-fullName', 'Full name is required.'); return; }
+  if (!idNumber) { fieldError('c-idNumber', 'ID number is required.'); return; }
+  if (!phoneDigits) { fieldError('c-phone', 'Phone number is required.'); return; }
+  if (phoneDigits.length < 7) { fieldError('c-phone', 'This looks too short — enter the number without the leading 0 (e.g. 81 234 5678).'); return; }
   // Every client must have a unique ID number
   const duplicate = state.clients.find(c => c.id !== editId && (c.idNumber || '').trim() === idNumber);
   if (duplicate) {
-    showAlert(`A client with ID number ${idNumber} already exists: ${duplicate.fullName}.\n\nEach client must have a unique ID number — open the existing client record instead of creating a new one.`, 'Duplicate ID Number');
+    fieldError('c-idNumber', `Already registered to ${duplicate.fullName} — open their existing record instead.`);
     return;
   }
   const phone = '+264' + phoneDigits;
@@ -2227,7 +2380,10 @@ async function savePayment(editId) {
   const amount = parseFloat(document.getElementById('p-amount').value);
   const date = document.getElementById('p-date').value;
   const method = document.getElementById('p-method').value;
-  if (!loanId || !amount || !date) { showAlert('Please fill all required fields.'); return; }
+  clearFieldErrors();
+  if (!loanId) { fieldError('p-loanId', 'Choose the loan this payment is for.'); return; }
+  if (!amount) { fieldError('p-amount', 'Enter the amount received.'); return; }
+  if (!date) { fieldError('p-date', 'Choose the payment date.'); return; }
   const loan = state.loans.find(l => l.id === loanId);
   const receiptNumber = document.getElementById('p-receipt').value.trim();
   const notes = document.getElementById('p-notes').value.trim();
@@ -4049,7 +4205,7 @@ async function saveSettingsForm() {
   window._pendingLogo = undefined;
   applyCompanyLogo();
   await logAudit('update', 'settings', 'company', { section: 'company' });
-  showAlert('Company settings saved successfully.', 'Saved');
+  showToast('Company settings saved');
 }
 
 async function savePenaltySettings() {
@@ -4064,7 +4220,7 @@ async function savePenaltySettings() {
   };
   await saveSettings();
   await logAudit('update', 'settings', 'penalty', { penalty: state.settings.penalty });
-  showAlert('Penalty settings saved. They apply automatically to all loans from now on.', 'Saved');
+  showToast('Penalty settings saved — applied to all loans from now on');
   render();
 }
 
@@ -4569,7 +4725,7 @@ async function copyExportToClipboard() {
   if (!state.currentExport) return;
   try {
     await navigator.clipboard.writeText(state.currentExport.content);
-    showAlert('Copied to clipboard. Paste into a file editor and save.', 'Copied');
+    showToast('Copied to clipboard');
   } catch (e) {
     showAlert('Could not auto-copy. Select all text in the box and copy manually (Ctrl+A then Ctrl+C).');
   }
@@ -4617,7 +4773,7 @@ async function handleBackupImport(input) {
         }
         await logAudit('import', 'backup', '', { source: file.name, clients: state.clients.length });
         reallocateAllSchedules();
-        showAlert('Backup restored successfully.', 'Done');
+        showToast('Backup restored');
         render();
       },
       'Restore', 'bg-red-600 hover:bg-red-700'
@@ -4812,7 +4968,7 @@ async function manualCloudBackup() {
   if (btn) { btn.disabled = true; btn.textContent = 'Backing up...'; }
   const ok = await runCloudBackup('manual');
   if (btn) { btn.disabled = false; btn.textContent = 'Back Up Now'; }
-  if (ok) { showAlert('Backup saved to cloud storage.', 'Backup Complete'); hydrateCloudBackups(); }
+  if (ok) { showToast('Backup saved to cloud storage'); hydrateCloudBackups(); }
 }
 
 async function hydrateCloudBackups() {
@@ -5095,7 +5251,7 @@ function sendCurrentPdfEmail() {
 // =====================================================
 async function autoSyncIfEnabled() { /* no-op */ }
 async function cloudSyncTest() { showAlert('Cloud sync is not needed — Supabase provides real-time multi-device sync automatically.', 'Info'); }
-async function cloudSyncPushNow() { showAlert('Data is automatically saved to Supabase on every change.', 'Info'); }
+async function cloudSyncPushNow() { showToast('Data is saved automatically on every change'); }
 async function cloudSyncPullNow() { showAlert('Data is automatically loaded from Supabase on every sign-in.', 'Info'); }
 async function buildSyncPayload() { return {}; }
 function renderSettingsSync() { return '<div class="text-slate-500">Cloud sync via Supabase is always on.</div>'; }
@@ -5183,8 +5339,8 @@ function showUploadLinkModal(url, client) {
           </div>
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
-          <button onclick="navigator.clipboard.writeText('${url}').then(() => showAlert('Link copied to clipboard'))" class="btn-secondary text-sm">Copy Link</button>
-          <button onclick="navigator.clipboard.writeText(\`${message.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`).then(() => showAlert('Message copied'))" class="btn-secondary text-sm">Copy Message</button>
+          <button onclick="navigator.clipboard.writeText('${url}').then(() => showToast('Link copied'))" class="btn-secondary text-sm">Copy Link</button>
+          <button onclick="navigator.clipboard.writeText(\`${message.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`).then(() => showToast('Message copied'))" class="btn-secondary text-sm">Copy Message</button>
           <a href="${waUrl}" target="_blank" class="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448L.057 24z"/></svg>
             Send via WhatsApp
@@ -5218,7 +5374,7 @@ function showSignatureLinkModal(url, loan, client) {
           </div>
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
-          <button onclick="navigator.clipboard.writeText('${url}').then(() => showAlert('Link copied to clipboard'))" class="btn-secondary text-sm">Copy Link</button>
+          <button onclick="navigator.clipboard.writeText('${url}').then(() => showToast('Link copied'))" class="btn-secondary text-sm">Copy Link</button>
           <a href="${waUrl}" target="_blank" class="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448L.057 24z"/></svg>
             Send via WhatsApp
@@ -5357,7 +5513,7 @@ function handlePublicFile(input, key, multiple) {
   if (files.length === 0) return;
   for (const f of files) {
     if (f.size > 10 * 1024 * 1024) {
-      alert(`File ${f.name} is too large. Maximum 10MB per file.`);
+      showAlert(`File ${f.name} is too large. Maximum 10MB per file.`);
       input.value = '';
       return;
     }
@@ -5476,7 +5632,7 @@ async function submitPublicUploads(token, clientId) {
       </div>
     `;
   } catch (e) {
-    alert('Upload failed: ' + e.message);
+    showAlert('Upload failed: ' + e.message);
     btn.disabled = false;
     btn.textContent = isTargeted ? 'Resubmit Document' : 'Submit Documents';
   }
@@ -5562,8 +5718,16 @@ async function renderSignaturePage(token) {
       <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
         <h2 class="font-semibold text-slate-900 mb-3">Draw Your Signature</h2>
         <div class="text-xs text-slate-500 mb-3">Use your finger to sign in the box below.</div>
-        <canvas id="signature-pad" width="500" height="200" style="width:100%; height:200px; border:2px dashed #cbd5e1; border-radius:8px; touch-action:none; background:white;"></canvas>
-        <button onclick="clearSignature()" class="text-sm text-blue-700 hover:underline mt-2">Clear Signature</button>
+        <canvas id="signature-pad" width="500" height="200" style="width:100%; height:200px; border:2px dashed #cbd5e1; border-radius:8px; touch-action:none; background:white;" aria-label="Signature drawing area"></canvas>
+        <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
+          <button onclick="clearSignature()" class="text-sm text-blue-700 hover:underline" style="min-height:32px;">Clear Signature</button>
+          <button onclick="toggleTypedSignature()" id="typed-sig-toggle" class="text-sm text-blue-700 hover:underline" style="min-height:32px;">Can't draw? Type your signature instead</button>
+        </div>
+        <div id="typed-sig-box" class="hidden mt-3">
+          <label for="typed-sig-input">Type your full name — it becomes your signature</label>
+          <input type="text" id="typed-sig-input" oninput="applyTypedSignature(this.value)" placeholder="e.g. Johannes Shikongo" autocomplete="name" style="min-height:44px;">
+          <div class="text-xs text-slate-500 mt-1">A typed signature is equally binding under the Electronic Transactions Act, 4 of 2019.</div>
+        </div>
       </div>
 
       <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
@@ -5586,6 +5750,38 @@ async function renderSignaturePage(token) {
   `;
 
   initSignaturePad();
+}
+
+// Accessible alternative to drawing: typing the name renders it onto
+// the signature canvas, so the rest of the flow is unchanged.
+function toggleTypedSignature() {
+  const box = document.getElementById('typed-sig-box');
+  if (!box) return;
+  box.classList.toggle('hidden');
+  if (!box.classList.contains('hidden')) {
+    const input = document.getElementById('typed-sig-input');
+    input.focus();
+    if (input.value) applyTypedSignature(input.value);
+  }
+}
+
+function applyTypedSignature(text) {
+  const canvas = document.getElementById('signature-pad');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const t = (text || '').trim();
+  if (!t) { window._sigHasStrokes = false; return; }
+  ctx.fillStyle = '#0f172a';
+  let size = 56;
+  ctx.font = `italic ${size}px "Segoe Script", "Brush Script MT", cursive`;
+  while (ctx.measureText(t).width > canvas.width - 40 && size > 18) {
+    size -= 4;
+    ctx.font = `italic ${size}px "Segoe Script", "Brush Script MT", cursive`;
+  }
+  ctx.textBaseline = 'middle';
+  ctx.fillText(t, 20, canvas.height / 2);
+  window._sigHasStrokes = true;
 }
 
 function initSignaturePad() {
@@ -5642,6 +5838,8 @@ function clearSignature() {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   window._sigHasStrokes = false;
+  const typed = document.getElementById('typed-sig-input');
+  if (typed) typed.value = '';
 }
 
 // =====================================================
@@ -5715,7 +5913,7 @@ async function saveLenderSignature() {
   if (error) { showAlert('Save failed: ' + error.message); return; }
   await logAudit('save', 'signature', state.currentUser.id, { action: 'stored_signature' });
   await saveTable('users');
-  showAlert('Signature saved. It will be applied automatically to future signed loans.', 'Saved');
+  showToast('Signature saved — it will be applied to future signed loans');
   render();
 }
 
@@ -5771,10 +5969,11 @@ async function submitSignature(token, loanId) {
   const idNumber = document.getElementById('sig-id').value.trim();
   const read = document.getElementById('sig-read').checked;
   const consent = document.getElementById('sig-consent').checked;
-  if (!name) return alert('Please type your full name.');
-  if (!idNumber) return alert('Please type your ID number.');
-  if (!read || !consent) return alert('Please tick both consent boxes.');
-  if (!window._sigHasStrokes) return alert('Please draw your signature.');
+  clearFieldErrors();
+  if (!name) return fieldError('sig-name', 'Please type your full name.');
+  if (!idNumber) return fieldError('sig-id', 'Please type your ID number.');
+  if (!read || !consent) return showAlert('Please tick both consent boxes to continue.');
+  if (!window._sigHasStrokes) return showAlert('Please draw your signature in the box (or use the type option).');
 
   const canvas = document.getElementById('signature-pad');
   const signatureImage = canvas.toDataURL('image/png');
@@ -5859,7 +6058,7 @@ async function submitSignature(token, loanId) {
       </div>
     `;
   } catch (e) {
-    alert('Could not save signature: ' + e.message);
+    showAlert('Could not save signature: ' + e.message);
   }
 }
 
@@ -6016,7 +6215,7 @@ async function viewAgreementInline() {
     document.getElementById('agreement-viewer').classList.remove('hidden');
     document.getElementById('agreement-viewer').scrollIntoView({ behavior: 'smooth' });
   } catch (e) {
-    alert('Could not display agreement: ' + e.message);
+    showAlert('Could not display agreement: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'View Agreement PDF';
@@ -6036,7 +6235,7 @@ async function downloadAgreementForClient() {
     const filename = `Signed_Loan_Agreement_${safeName}_${loanRefStr}.pdf`;
     doc.save(filename);
   } catch (e) {
-    alert('Could not download agreement: ' + e.message);
+    showAlert('Could not download agreement: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Download to My Device';
@@ -6448,7 +6647,7 @@ async function generateRejectionUploadLink(clientId, docKey, reason) {
           </div>
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
-          <button onclick="navigator.clipboard.writeText(\`${message.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`).then(() => showAlert('Message copied'))" class="btn-secondary text-sm">Copy Message</button>
+          <button onclick="navigator.clipboard.writeText(\`${message.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`).then(() => showToast('Message copied'))" class="btn-secondary text-sm">Copy Message</button>
           <a href="${waUrl}" target="_blank" class="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium">Send via WhatsApp</a>
           <button onclick="closeModal(); openClientDetail('${clientId}');" class="btn-secondary text-sm">Done</button>
         </div>
@@ -6676,6 +6875,8 @@ function refreshViewIfIdle() {
   if (modalOpen || typing) return;
   render();
   buildNav();
+  const live = document.getElementById('live-region');
+  if (live) live.textContent = 'Data updated ' + new Date().toLocaleTimeString();
 }
 
 // Safety-net poll: every 90 seconds (only while the tab is visible),
@@ -6942,7 +7143,7 @@ async function subscribeToPush() {
       device_label: deviceLabel
     }, { onConflict: 'endpoint' });
     if (error) { showAlert('Could not save subscription: ' + error.message); return false; }
-    showAlert('Push notifications are now enabled on this device.', 'Enabled');
+    showToast('Push notifications enabled on this device');
     render();
     return true;
   } catch (e) {
@@ -6960,7 +7161,7 @@ async function unsubscribeFromPush() {
       await db.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
       await sub.unsubscribe();
     }
-    showAlert('Push notifications disabled on this device.', 'Disabled');
+    showToast('Push notifications disabled on this device');
     render();
   } catch (e) {
     showAlert('Could not disable push: ' + e.message);
@@ -7285,11 +7486,11 @@ function handleApplyFile(input, key, multiple) {
   input.value = ''; // allow re-selecting / adding more later
   if (files.length === 0) return;
   for (const f of files) {
-    if (f.size > 10 * 1024 * 1024) { alert(`File "${f.name}" is too large. Maximum 10MB per file.`); return; }
+    if (f.size > 10 * 1024 * 1024) { showAlert(`File "${f.name}" is too large. Maximum 10MB per file.`); return; }
   }
   if (multiple) {
     const existing = window._applyUploads[key] || [];
-    if (existing.length + files.length > 60) { alert('Maximum 60 pages per document.'); return; }
+    if (existing.length + files.length > 60) { showAlert('Maximum 60 pages per document.'); return; }
     window._applyUploads[key] = existing.concat(files);
   } else {
     window._applyUploads[key] = [files[0]];
@@ -7363,10 +7564,12 @@ async function submitApplication() {
   const repaymentDate = document.getElementById('app-repaymentDate').value;
   const disbMethod = document.getElementById('app-disbMethod').value;
   const repayMethod = document.getElementById('app-repayMethod').value;
-  if (!/^\d{9,13}$/.test(idNum)) { alert('Please check your ID number — it should be the digits on your Namibian ID.'); return; }
-  if (phoneDigits.length < 7 || phoneDigits.length > 9) { alert('Please check your mobile number — enter it without the first 0, for example 81 234 5678.'); return; }
-  if (applyRepayDateProblem(repaymentDate)) { alert('Please choose your repayment date — the day you get paid. It must be within one month from today.'); return; }
-  if (!disbMethod || !repayMethod) { alert('Please choose how you would like to receive the money and how you will repay.'); return; }
+  clearFieldErrors();
+  if (!/^\d{9,13}$/.test(idNum)) { fieldError('app-idNumber', 'Please check your ID number — it should be the digits on your Namibian ID.'); return; }
+  if (phoneDigits.length < 7 || phoneDigits.length > 9) { fieldError('app-phone', 'Please check your number — enter it without the first 0, e.g. 81 234 5678.'); return; }
+  if (applyRepayDateProblem(repaymentDate)) { fieldError('app-repaymentDate', 'Choose the day you get paid — within one month from today.'); return; }
+  if (!disbMethod) { fieldError('app-disbMethod', 'Choose how you would like to receive the money.'); return; }
+  if (!repayMethod) { fieldError('app-repayMethod', 'Choose how you will repay.'); return; }
 
   btn.disabled = true;
   // Keep the same application ID and completed-upload record across retries,
@@ -7451,7 +7654,7 @@ async function submitApplication() {
       </div>
     `;
   } catch (e) {
-    alert(e.message + '\n\nPlease check your network signal and tap "Submit Application" again — pages already uploaded will NOT be re-uploaded, it will continue from where it stopped.');
+    showAlert(e.message + '\n\nPlease check your network signal and tap "Submit Application" again — pages already uploaded will NOT be re-uploaded, it will continue from where it stopped.');
     btn.disabled = false;
     btn.textContent = 'Submit Application';
   }
@@ -7465,7 +7668,7 @@ function applyPageUrl() {
 }
 
 function copyApplyLink() {
-  navigator.clipboard.writeText(applyPageUrl()).then(() => showAlert('Application link copied. Share it with clients via WhatsApp, SMS or social media.', 'Link Copied'));
+  navigator.clipboard.writeText(applyPageUrl()).then(() => showToast('Application link copied — share it with clients'));
 }
 
 function shareApplyLinkWhatsApp() {
