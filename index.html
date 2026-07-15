@@ -368,6 +368,84 @@ function clientRefById(clientId) {
 // =====================================================
 // DATA LOADING (from Supabase)
 // =====================================================
+// -----------------------------------------------------
+// OFFLINE DATA SNAPSHOT
+// Every successful load saves a copy of the working data on the
+// device; opening the app with no connection restores it read-mostly
+// (viewing everything, recording payments) with a clear banner.
+// Heavy fields (signature images) are slimmed to fit device storage.
+// -----------------------------------------------------
+function saveOfflineSnapshot() {
+  try {
+    const slimLoan = (l) => ({
+      ...l,
+      signatureData: l.signatureData ? { name: l.signatureData.name, id_number: l.signatureData.id_number, timestamp: l.signatureData.timestamp } : null,
+      lenderSignatureData: l.lenderSignatureData ? { signed_by_name: l.lenderSignatureData.signed_by_name, timestamp: l.lenderSignatureData.timestamp, method: l.lenderSignatureData.method } : null
+    });
+    const snap = {
+      savedAt: new Date().toISOString(),
+      currentUser: state.currentUser,
+      settings: { ...state.settings, logo: undefined },
+      users: (state.users || []).map(u => ({ id: u.id, fullName: u.fullName, role: u.role, active: u.active })),
+      clients: state.clients,
+      loans: (state.loans || []).map(slimLoan),
+      payments: state.payments,
+      products: state.products,
+      applications: state.applications,
+      clientLinks: state.clientLinks
+    };
+    localStorage.setItem('gpl_offline_snapshot', JSON.stringify(snap));
+  } catch (e) { console.warn('Offline snapshot not saved:', e); }
+}
+
+function loadOfflineSnapshot() {
+  try {
+    const snap = JSON.parse(localStorage.getItem('gpl_offline_snapshot') || 'null');
+    if (!snap || !snap.savedAt) return false;
+    state.clients = snap.clients || [];
+    state.loans = snap.loans || [];
+    state.payments = snap.payments || [];
+    state.products = snap.products || [];
+    state.applications = snap.applications || [];
+    state.clientLinks = snap.clientLinks || [];
+    state.users = snap.users || [];
+    state.audit = []; state.capital = []; state.bankStatements = []; state.bankTx = [];
+    state.settings = { ...(snap.settings || {}) };
+    if (!state.settings.penalty) state.settings.penalty = { enabled: false, type: 'percentage', amount: 5, basis: 'instalment', frequency: 'monthly', gracePeriodDays: 3, maxPenaltyPercent: 100 };
+    const cachedLogo = localStorage.getItem('gpl_company_logo');
+    if (cachedLogo) state.settings.logo = cachedLogo;
+    state.loans.forEach(l => { if (!l.schedule || l.schedule.length === 0) l.schedule = generateSchedule(l); });
+    window._offlineSince = snap.savedAt;
+    return true;
+  } catch (e) { return false; }
+}
+
+function showOfflineBanner() {
+  if (document.getElementById('offline-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'offline-banner';
+  el.setAttribute('role', 'status');
+  el.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9998; background:#b45309; color:#fff; padding:8px 16px; text-align:center; font-size:13px; font-weight:500;';
+  el.textContent = `Offline — showing data saved ${window._offlineSince ? fmtDateTime(window._offlineSince) : 'earlier'}. You can view everything and record payments; other changes need a connection.`;
+  document.body.appendChild(el);
+}
+
+function hideOfflineBanner() {
+  const el = document.getElementById('offline-banner');
+  if (el) el.remove();
+}
+
+window.addEventListener('online', async () => {
+  if (window._offlineMode && state.currentUser) {
+    await loadData();
+    if (!window._offlineMode) {
+      showToast('Back online — data refreshed');
+      render();
+      buildNav();
+    }
+  }
+});
+
 async function loadData() {
   try {
     const [clientsRes, loansRes, paymentsRes, productsRes, settingsRes, auditRes, profilesRes, linksRes, applicationsRes, capitalRes, bankStRes, bankTxRes] = await Promise.all([
@@ -384,6 +462,13 @@ async function loadData() {
       db.from('bank_statements').select('*').order('created_at', {ascending: false}),
       db.from('bank_transactions').select('*').order('tx_date', {ascending: false})
     ]);
+    const netFail = !navigator.onLine || (clientsRes.error && /fetch|network|load failed/i.test(clientsRes.error.message || ''));
+    if (netFail && loadOfflineSnapshot()) {
+      window._offlineMode = true;
+      showOfflineBanner();
+      updateStatusBar();
+      return;
+    }
     state.clients = (clientsRes.data || []).map(snakeToCamel);
     state.loans = (loansRes.data || []).map(snakeToCamel);
     state.payments = (paymentsRes.data || []).map(snakeToCamel);
@@ -403,8 +488,15 @@ async function loadData() {
     state.settings.sync = { enabled: false };
     // Ensure all loans have schedules
     state.loans.forEach(l => { if (!l.schedule || l.schedule.length === 0) l.schedule = generateSchedule(l); });
+    window._offlineMode = false;
+    hideOfflineBanner();
+    saveOfflineSnapshot();
   } catch (e) {
     console.error('Load error:', e);
+    if (loadOfflineSnapshot()) {
+      window._offlineMode = true;
+      showOfflineBanner();
+    }
   }
   updateStatusBar();
 }
@@ -672,6 +764,7 @@ async function logout() {
   window._intentionalLogout = true;
   await db.auth.signOut();
   window._intentionalLogout = false;
+  localStorage.removeItem('gpl_offline_snapshot');
   state.currentUser = null;
   state.notifications = [];
   if (window._notificationChannel) {
@@ -687,14 +780,27 @@ async function logout() {
 }
 
 async function restoreSession() {
-  const { data } = await db.auth.getSession();
-  if (data?.session?.user) {
-    const { data: profile } = await db.from('profiles').select('*').eq('id', data.session.user.id).maybeSingle();
+  let session = null;
+  try { const { data } = await db.auth.getSession(); session = data?.session || null; } catch (e) { /* offline */ }
+  if (!session?.user) return false;
+  try {
+    const { data: profile, error } = await db.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
     if (profile && profile.active) {
-      state.currentUser = { id: data.session.user.id, email: data.session.user.email, fullName: profile.full_name, role: profile.role };
+      state.currentUser = { id: session.user.id, email: session.user.email, fullName: profile.full_name, role: profile.role };
       return true;
     }
-  }
+    if (profile) return false; // account deactivated
+    if (!error) return false;  // genuinely no profile
+  } catch (e) { /* network failure — fall through to offline check */ }
+  // Offline: a valid local login plus a snapshot for the same user lets
+  // the app open with the saved data.
+  try {
+    const snap = JSON.parse(localStorage.getItem('gpl_offline_snapshot') || 'null');
+    if (snap?.currentUser?.id === session.user.id) {
+      state.currentUser = snap.currentUser;
+      return true;
+    }
+  } catch (e) {}
   return false;
 }
 
@@ -722,7 +828,7 @@ function handleSessionExpired() {
 }
 
 async function verifySessionAlive() {
-  if (!state.currentUser) return;
+  if (!state.currentUser || !navigator.onLine) return;
   try {
     const { data } = await db.auth.getSession();
     if (!data?.session) handleSessionExpired();
