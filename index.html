@@ -233,6 +233,16 @@
         </button>
       </div>
     </div>
+    <div class="px-3 pt-3">
+      <div class="relative">
+        <input type="search" id="global-search" placeholder="Search name, phone, ID, loan ref..." autocomplete="off"
+          aria-label="Search clients, loans and applications"
+          oninput="runGlobalSearch(this.value)" onfocus="runGlobalSearch(this.value)"
+          onblur="setTimeout(() => document.getElementById('global-search-results')?.classList.add('hidden'), 200)"
+          class="w-full text-sm">
+        <div id="global-search-results" class="hidden absolute z-40 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-y-auto mt-1"></div>
+      </div>
+    </div>
     <nav id="nav-menu" class="flex-1 p-3 space-y-1 overflow-y-auto"></nav>
     <div class="p-4 border-t border-slate-200">
       <div id="user-info" class="text-sm"></div>
@@ -861,7 +871,56 @@ async function doLogin() {
 // =====================================================
 // NAVIGATION
 // =====================================================
+// -----------------------------------------------------
+// GLOBAL SEARCH — one box that finds clients, loans and applications
+// by name, phone, ID number or reference.
+// -----------------------------------------------------
+function runGlobalSearch(query) {
+  const box = document.getElementById('global-search-results');
+  if (!box) return;
+  const q = (query || '').trim().toLowerCase();
+  if (q.length < 2) { box.classList.add('hidden'); return; }
+  const results = [];
+  (state.clients || []).forEach(c => {
+    if ((c.fullName || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || (c.idNumber || '').includes(q)) {
+      results.push({ icon: '👤', label: c.fullName, sub: `Client · ${c.phone || ''}${c.idNumber ? ' · ID ' + c.idNumber : ''}`, action: `openClientDetail('${c.id}')` });
+    }
+  });
+  (state.loans || []).forEach(l => {
+    if (loanRef(l).toLowerCase().includes(q)) {
+      results.push({ icon: '💰', label: `${loanRef(l)} — ${clientName(l.clientId)}`, sub: `Loan · ${fmt(l.principal)} · ${l.status}`, action: `openLoanDetail('${l.id}')` });
+    }
+  });
+  (state.applications || []).forEach(a => {
+    if ((a.fullName || '').toLowerCase().includes(q) || applicationRef(a).toLowerCase().includes(q) || (a.phone || '').includes(q)) {
+      results.push({ icon: '📄', label: `${applicationRef(a)} — ${a.fullName}`, sub: `Application · ${a.status}`, action: `openApplicationReview('${a.id}')` });
+    }
+  });
+  const top = results.slice(0, 8);
+  box.innerHTML = top.length
+    ? top.map(r => `
+        <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100" onclick="document.getElementById('global-search').value=''; document.getElementById('global-search-results').classList.add('hidden'); if (typeof toggleMobileSidebar === 'function') toggleMobileSidebar(false); ${r.action}">
+          <div class="text-sm"><span aria-hidden="true">${r.icon}</span> <span class="font-medium text-slate-900">${escapeHtml(r.label)}</span></div>
+          <div class="text-xs text-slate-500 ml-6">${escapeHtml(r.sub)}</div>
+        </button>`).join('')
+    : '<div class="px-3 py-2 text-sm text-slate-500">No matches</div>';
+  box.classList.remove('hidden');
+}
+
+// Press "/" anywhere (outside a field) to jump to search
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || anyDialogOpen()) return;
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+  const el = document.getElementById('global-search');
+  if (el && state.currentUser) { e.preventDefault(); el.focus(); }
+});
+
 function buildNav() {
+  const groups = {
+    dashboard: '', loans: 'Work', clients: 'Work', applications: 'Work', payments: 'Work', reminders: 'Work',
+    reports: 'Insights', capital: 'Insights', bankrecon: 'Insights',
+    users: 'Admin', audit: 'Admin', data: 'Admin', settings: 'Admin'
+  };
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', show: true },
     { id: 'loans', label: 'Loans', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', show: can('read','loans') },
@@ -877,13 +936,20 @@ function buildNav() {
     { id: 'data', label: 'Backup & Export', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4', show: state.currentUser?.role === 'Administrator' },
     { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z', show: state.currentUser?.role === 'Administrator' }
   ];
-  const html = items.filter(i => i.show).map(i => `
+  let lastGroup = null;
+  const html = items.filter(i => i.show).map(i => {
+    const group = groups[i.id] || '';
+    const heading = group && group !== lastGroup
+      ? `<div class="px-4 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400" aria-hidden="true">${group}</div>`
+      : '';
+    lastGroup = group || lastGroup;
+    return heading + `
     <button onclick="navigate('${i.id}')" id="nav-${i.id}" class="w-full text-left px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium ${state.currentView===i.id?'nav-active':'nav-inactive'}">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${i.icon}"/></svg>
       <span class="flex-1">${i.label}</span>
       ${i.badge ? `<span class="ml-auto text-[11px] font-bold bg-red-600 text-white rounded-full px-2 py-0.5">${i.badge}</span>` : ''}
-    </button>
-  `).join('');
+    </button>`;
+  }).join('');
   document.getElementById('nav-menu').innerHTML = html;
 }
 
@@ -1271,6 +1337,29 @@ function renderDashboard() {
 // =====================================================
 // LOANS
 // =====================================================
+// -----------------------------------------------------
+// LIST PAGINATION — keeps big tables fast and scannable.
+// -----------------------------------------------------
+function paginate(key, rows, pageSize = 50) {
+  if (!state.tablePages) state.tablePages = {};
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(state.tablePages[key] || 1, pages);
+  state.tablePages[key] = page;
+  return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pages, total, pageSize };
+}
+
+function pagerHtml(key, p) {
+  if (p.pages <= 1) return '';
+  return `<div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-sm text-slate-600">
+    <span>Showing ${(p.page - 1) * p.pageSize + 1}–${Math.min(p.page * p.pageSize, p.total)} of ${p.total}</span>
+    <span class="flex gap-2">
+      <button class="btn-secondary text-xs" ${p.page <= 1 ? 'disabled' : ''} onclick="state.tablePages['${key}'] = ${p.page - 1}; render();">‹ Previous</button>
+      <button class="btn-secondary text-xs" ${p.page >= p.pages ? 'disabled' : ''} onclick="state.tablePages['${key}'] = ${p.page + 1}; render();">Next ›</button>
+    </span>
+  </div>`;
+}
+
 function renderLoans() {
   const f = state.filters.loans;
   const q = (f.search || '').toLowerCase().trim();
@@ -1339,7 +1428,7 @@ function renderLoans() {
             <th>Loan Ref</th><th>Client</th><th>Principal</th><th>Outstanding</th><th>Maturity</th><th>Status</th>
           </tr></thead>
           <tbody>
-            ${filtered.map(l => {
+            ${(window._pgLoans = paginate('loans', filtered)).rows.map(l => {
               const overdue = isOverdue(l);
               const status = overdue ? 'Overdue' : l.status;
               const checked = state.bulkSelection.loans.has(l.id);
@@ -1355,7 +1444,7 @@ function renderLoans() {
                 </tr>`;
             }).join('')}
           </tbody>
-        </table>`}
+        </table>${pagerHtml('loans', window._pgLoans)}`}
     </div>
   `;
 }
@@ -1437,6 +1526,7 @@ function openLoanForm(editId, preselectClientId) {
             <div><div class="text-xs text-slate-500 uppercase">APR (disclosed)</div><div id="calc-apr" class="text-xl font-bold text-amber-700">0.00%</div></div>
           </div>
           <div class="text-xs text-slate-500 -mt-2">APR is the effective annual percentage rate required by NAMFISA for disclosure on loan agreements.</div>
+          <div id="afford-warning"></div>
           ${editing && loanPaid(editId) > 0 ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900"><strong>⚠ Warning:</strong> This loan has ${fmt(loanPaid(editId))} in recorded payments. Changing principal, rate, or term will regenerate the schedule and reallocate payments.</div>` : ''}
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
@@ -1583,6 +1673,41 @@ function syncFirstPaymentDefault() {
   el.value = defaultFirstPaymentDate(disb);
 }
 
+// -----------------------------------------------------
+// AFFORDABILITY GUARD — NAMFISA-aligned rule of thumb: the instalment
+// should not exceed one-third of the client's verified monthly income.
+// Income comes from the client record, or the AI statement analysis.
+// -----------------------------------------------------
+const AFFORDABILITY_MAX_SHARE = 1 / 3;
+
+function clientMonthlyIncome(clientId) {
+  const c = state.clients.find(x => x.id === clientId);
+  if (!c) return 0;
+  let income = parseFloat(c.monthlyIncome) || 0;
+  if (!income && c.aiAnalysis) income = parseFloat(c.aiAnalysis.monthly_income_estimate) || 0;
+  if (!income) {
+    const apps = (state.applications || []).filter(a => a.clientId === clientId && a.aiAnalysis);
+    apps.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+    if (apps[0]) income = parseFloat(apps[0].aiAnalysis.monthly_income_estimate) || 0;
+  }
+  return income;
+}
+
+function affordabilityBreach(clientId, monthlyInstalment) {
+  const income = clientMonthlyIncome(clientId);
+  if (!income || !monthlyInstalment) return null;
+  const maxInst = Math.round(income * AFFORDABILITY_MAX_SHARE * 100) / 100;
+  return monthlyInstalment > maxInst ? { income, maxInst } : null;
+}
+
+function affordabilityWarningHtml(breach, monthly) {
+  if (!breach) return '';
+  return `
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+      <strong>⚠ Affordability warning.</strong> The instalment of ${fmt(monthly)} is more than one-third of this client's monthly income (${fmt(breach.income)} → recommended maximum ${fmt(breach.maxInst)}). Consider a smaller amount or a longer term.
+    </div>`;
+}
+
 // eWallet payouts cost N$20, passed on to the client in the repayment.
 const EWALLET_FEE = 20;
 const EWALLET_MARKER = ' · Disbursed via eWallet (incl. N$20 eWallet fee)';
@@ -1620,6 +1745,11 @@ function updateLoanCalc() {
   document.getElementById('calc-apr').textContent = apr.toFixed(2) + '%';
   const hint = document.getElementById('disb-method-hint');
   if (hint) hint.textContent = fee ? `Includes ${fmt(fee)} eWallet fee in the total repayable.` : '';
+  const warnEl = document.getElementById('afford-warning');
+  if (warnEl) {
+    const breach = affordabilityBreach(document.getElementById('f-clientId')?.value, monthlyInstallment);
+    warnEl.innerHTML = affordabilityWarningHtml(breach, monthlyInstallment);
+  }
 }
 
 async function saveLoan(editId) {
@@ -1670,6 +1800,20 @@ async function saveLoan(editId) {
   }
 
   const { totalRepayable, monthlyInstallment, method } = loanFormFeeTotals(principal, rate, term);
+  // Affordability gate: proceeding past one-third of income requires
+  // an explicit confirmation.
+  if (!window._allowUnaffordable) {
+    const breach = affordabilityBreach(clientId, monthlyInstallment);
+    if (breach) {
+      confirmAction(
+        `Affordability warning: the instalment of ${fmt(monthlyInstallment)} exceeds one-third of ${clientName(clientId)}'s monthly income (${fmt(breach.income)} — recommended maximum ${fmt(breach.maxInst)}).\n\nNAMFISA expects affordability to be assessed before lending. Issue this loan anyway?`,
+        async () => { window._allowUnaffordable = true; try { await saveLoan(editId); } finally { window._allowUnaffordable = false; } },
+        'Issue Anyway',
+        'bg-amber-600 hover:bg-amber-700'
+      );
+      return;
+    }
+  }
   const purposeFinal = stripDisbMarker(purpose) + (method === 'eWallet' ? EWALLET_MARKER : '');
   const matDate = new Date(disbDate);
   matDate.setMonth(matDate.getMonth() + term);
@@ -1712,6 +1856,71 @@ async function saveLoan(editId) {
   await saveTable('loans');
   closeModal();
   render();
+}
+
+// =====================================================
+// DISBURSEMENT RECORDING
+// Money leaving the business is an event worth its own record: when,
+// how (channel), reference, and by whom.
+// =====================================================
+function openDisbursementForm(loanId) {
+  if (!requirePerm('update', 'loans')) return;
+  const loan = state.loans.find(l => l.id === loanId);
+  if (!loan) return;
+  const client = state.clients.find(c => c.id === loan.clientId);
+  const defaultChannel = loanEwalletFee(loan) ? 'eWallet' : 'Bank Transfer (EFT)';
+  document.getElementById('modal-container').innerHTML = `
+    <div class="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+          <h2 class="font-semibold text-lg">Record Payout — ${loanRef(loan)}</h2>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="bg-slate-50 rounded-lg p-3 text-sm flex justify-between"><span class="text-slate-600">${escapeHtml(client?.fullName || '—')}</span><span class="font-medium">${fmt(loan.principal)}</span></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label>Paid Out On *</label><input type="date" id="d-date" value="${today()}"></div>
+            <div><label>Channel *</label>
+              <select id="d-channel">
+                <option ${defaultChannel === 'Bank Transfer (EFT)' ? 'selected' : ''}>Bank Transfer (EFT)</option>
+                <option ${defaultChannel === 'eWallet' ? 'selected' : ''}>eWallet</option>
+                <option>Cash</option>
+              </select>
+            </div>
+          </div>
+          <div><label>Reference</label><input type="text" id="d-ref" placeholder="e.g. bank reference or eWallet voucher no."></div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="saveDisbursement('${loanId}')" class="btn-primary bg-green-700 hover:bg-green-800">Record Payout</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveDisbursement(loanId) {
+  clearFieldErrors();
+  const date = document.getElementById('d-date').value;
+  const channel = document.getElementById('d-channel').value;
+  const ref = document.getElementById('d-ref').value.trim();
+  if (!date) { fieldError('d-date', 'Choose the payout date.'); return; }
+  const { error } = await db.from('loans').update({
+    disbursed_at: date,
+    disbursed_by: state.currentUser?.id || null,
+    disbursement_channel: channel,
+    disbursement_ref: ref || null
+  }).eq('id', loanId);
+  if (error && /disbursed_at|disbursement/i.test(error.message)) {
+    showAlert('The database needs a one-time update to record payouts. Run this in the Supabase SQL Editor, then try again:\n\nalter table public.loans add column if not exists disbursed_at date, add column if not exists disbursed_by uuid, add column if not exists disbursement_channel text, add column if not exists disbursement_ref text;', 'One-Time Setup Needed');
+    return;
+  }
+  if (error) { showAlert('Could not record the payout: ' + error.message); return; }
+  await logAudit('disburse', 'loan', loanId, { date, channel, ref });
+  await saveTable('loans');
+  closeModal();
+  showToast('Payout recorded — ' + channel);
+  openLoanDetail(loanId);
 }
 
 // =====================================================
@@ -1759,6 +1968,7 @@ function openTopUpForm(loanId) {
             <div class="flex justify-between"><span class="text-blue-900">Total repayable</span><span class="font-medium" id="tu-total">—</span></div>
             <div class="flex justify-between"><span class="text-blue-900">Monthly instalment</span><span class="font-medium" id="tu-monthly">—</span></div>
           </div>
+          <div id="tu-afford"></div>
           <div class="text-xs text-slate-500">The old loan is closed with a "Top-Up Settlement" record — no new interest is charged on it. The client signs a fresh agreement for the new loan.</div>
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
@@ -1783,6 +1993,12 @@ function updateTopUpCalc(loanId) {
   set('tu-principal', fmt(principal));
   set('tu-total', fmt(totalRepayable));
   set('tu-monthly', fmt(monthlyInstallment));
+  const warnEl = document.getElementById('tu-afford');
+  if (warnEl) {
+    const loan = state.loans.find(l => l.id === loanId);
+    const breach = loan ? affordabilityBreach(loan.clientId, monthlyInstallment) : null;
+    warnEl.innerHTML = affordabilityWarningHtml(breach, monthlyInstallment);
+  }
 }
 
 async function confirmTopUp(loanId) {
@@ -1892,6 +2108,7 @@ function openLoanDetail(loanId) {
             <button onclick="downloadLoanAgreement('${loan.id}')" class="btn-secondary text-sm flex items-center gap-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>${loan.signedAt ? 'Signed Agreement PDF' : 'Agreement PDF'}</button>
             <button onclick="sendLoanApprovalWhatsApp('${loan.id}')" class="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg font-medium flex items-center gap-1"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>Approval Message</button>
             ${!loan.signedAt ? `<button onclick="generateSignatureLink('${loan.id}')" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg font-medium">Send for e-Signature</button>` : ''}
+            ${loan.signedAt && !loan.disbursedAt && can('update', 'loans') ? `<button onclick="openDisbursementForm('${loan.id}')" class="text-sm bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded-lg font-medium">Record Payout</button>` : ''}
             ${loan.status === 'Active' && outstanding > 0.01 && can('create', 'loans') ? `<button onclick="openTopUpForm('${loan.id}')" class="text-sm bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-medium">Top Up...</button>` : ''}
             ${canEdit ? `<button onclick="openLoanForm('${loan.id}')" class="btn-secondary text-sm">Edit</button>` : ''}
             ${canDel ? `<button onclick="deleteLoan('${loan.id}')" class="text-sm text-red-600 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 font-medium">Delete</button>` : ''}
@@ -1927,6 +2144,7 @@ function openLoanDetail(loanId) {
             <div><div class="text-xs text-slate-500 uppercase">Matures</div><div class="font-semibold mt-1">${fmtDate(loan.maturityDate)}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Total Repayable</div><div class="font-semibold mt-1">${fmt(loan.totalRepayable)}</div></div>
             <div><div class="text-xs text-slate-500 uppercase">Status</div><div class="mt-1"><span class="badge badge-${(isOverdue(loan)?'overdue':loan.status).toLowerCase()}">${isOverdue(loan)?'Overdue':loan.status}</span></div></div>
+            <div><div class="text-xs text-slate-500 uppercase">Paid Out</div><div class="font-semibold mt-1">${loan.disbursedAt ? `${fmtDate(loan.disbursedAt)} <span class="text-xs font-normal text-slate-500">via ${escapeHtml(loan.disbursementChannel || '—')}${loan.disbursementRef ? ' · ' + escapeHtml(loan.disbursementRef) : ''}</span>` : '<span class="text-amber-700 text-sm">Not recorded</span>'}</div></div>
           </div>
 
           <div class="bg-slate-50 rounded-lg p-4 mb-6">
@@ -2023,13 +2241,13 @@ function renderClients() {
         <table>
           <thead><tr><th>Client Ref</th><th>Full Name</th><th>Phone</th><th>Active Loans</th><th>Outstanding</th><th>Status</th></tr></thead>
           <tbody>
-            ${filtered.map(c => {
+            ${(window._pgClients = paginate('clients', filtered)).rows.map(c => {
               const loans = state.loans.filter(l => l.clientId === c.id && l.status === 'Active');
               const outstanding = loans.reduce((s, l) => s + loanOutstanding(l.id), 0);
               return `<tr class="clickable" onclick="openClientDetail('${c.id}')"><td class="font-mono text-xs">${clientRef(c)}</td><td class="font-medium">${escapeHtml(c.fullName)}</td><td>${escapeHtml(c.phone)}</td><td>${loans.length}</td><td class="font-medium">${fmt(outstanding)}</td><td><span class="badge badge-${(c.status||'Active').toLowerCase()}">${c.status||'Active'}</span></td></tr>`;
             }).join('')}
           </tbody>
-        </table>`}
+        </table>${pagerHtml('clients', window._pgClients)}`}
     </div>
   `;
 }
@@ -2304,9 +2522,9 @@ function renderPayments() {
         <table>
           <thead><tr><th>Payment Ref</th><th>Date</th><th>Client</th><th>Loan Ref</th><th>Amount</th><th>Method</th><th>Receipt</th><th class="text-right">Actions</th></tr></thead>
           <tbody>
-            ${sorted.map(p => `<tr><td class="font-mono text-xs">${paymentRef(p)}</td><td>${fmtDate(p.paymentDate)}</td><td class="font-medium">${escapeHtml(clientName(p.clientId))}</td><td class="font-mono text-xs">${loanRefById(p.loanId)}</td><td class="font-medium text-green-700">${fmt(p.amount)}</td><td>${escapeHtml(p.method)}</td><td class="font-mono text-xs">${escapeHtml(p.receiptNumber || '—')}</td><td class="text-right whitespace-nowrap"><button onclick="downloadReceipt('${p.id}')" class="text-xs text-blue-700 hover:underline mr-3" title="Receipt PDF">Receipt</button><button onclick="shareReceiptWhatsApp('${p.id}')" class="text-xs text-green-700 hover:underline mr-3" title="WhatsApp">WhatsApp</button>${can('update','payments')?`<button onclick="openPaymentForm(null,'${p.id}')" class="text-xs text-slate-600 hover:underline mr-3">Edit</button>`:''}${can('delete','payments')?`<button onclick="deletePayment('${p.id}')" class="text-xs text-red-600 hover:underline">Delete</button>`:''}</td></tr>`).join('')}
+            ${(window._pgPayments = paginate('payments', sorted)).rows.map(p => `<tr><td class="font-mono text-xs">${paymentRef(p)}</td><td>${fmtDate(p.paymentDate)}</td><td class="font-medium">${escapeHtml(clientName(p.clientId))}</td><td class="font-mono text-xs">${loanRefById(p.loanId)}</td><td class="font-medium text-green-700">${fmt(p.amount)}</td><td>${escapeHtml(p.method)}</td><td class="font-mono text-xs">${escapeHtml(p.receiptNumber || '—')}</td><td class="text-right whitespace-nowrap"><button onclick="downloadReceipt('${p.id}')" class="text-xs text-blue-700 hover:underline mr-3" title="Receipt PDF">Receipt</button><button onclick="shareReceiptWhatsApp('${p.id}')" class="text-xs text-green-700 hover:underline mr-3" title="WhatsApp">WhatsApp</button>${can('update','payments')?`<button onclick="openPaymentForm(null,'${p.id}')" class="text-xs text-slate-600 hover:underline mr-3">Edit</button>`:''}${can('delete','payments')?`<button onclick="deletePayment('${p.id}')" class="text-xs text-red-600 hover:underline">Delete</button>`:''}</td></tr>`).join('')}
           </tbody>
-        </table>`}
+        </table>${pagerHtml('payments', window._pgPayments)}`}
     </div>
   `;
 }
@@ -2993,9 +3211,9 @@ function renderAudit() {
         <table>
           <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Entity</th><th>Entity ID</th><th>Details</th></tr></thead>
           <tbody>
-            ${filtered.map(a => `<tr><td class="whitespace-nowrap">${fmtDateTime(a.timestamp)}</td><td class="font-medium">${escapeHtml(a.userName)}</td><td><span class="badge badge-${a.action==='delete'?'overdue':a.action==='create'?'completed':a.action==='update'?'pending':'inactive'}">${a.action}</span></td><td>${a.entity}</td><td class="font-mono text-xs">${a.entityId || '—'}</td><td><button onclick="showAuditDetail('${a.id}')" class="text-blue-700 text-xs hover:underline">View details</button></td></tr>`).join('')}
+            ${(window._pgAudit = paginate('audit', filtered)).rows.map(a => `<tr><td class="whitespace-nowrap">${fmtDateTime(a.timestamp)}</td><td class="font-medium">${escapeHtml(a.userName)}</td><td><span class="badge badge-${a.action==='delete'?'overdue':a.action==='create'?'completed':a.action==='update'?'pending':'inactive'}">${a.action}</span></td><td>${a.entity}</td><td class="font-mono text-xs">${a.entityId || '—'}</td><td><button onclick="showAuditDetail('${a.id}')" class="text-blue-700 text-xs hover:underline">View details</button></td></tr>`).join('')}
           </tbody>
-        </table>`}
+        </table>${pagerHtml('audit', window._pgAudit)}`}
     </div>
   `;
 }
@@ -7730,7 +7948,7 @@ function renderApplications() {
               <th class="px-4 py-3">Date</th><th class="px-4 py-3">Ref</th><th class="px-4 py-3">Applicant</th><th class="px-4 py-3">ID Number</th><th class="px-4 py-3">WhatsApp</th><th class="px-4 py-3">Requested</th><th class="px-4 py-3">Repay Date</th><th class="px-4 py-3">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              ${filtered.map(a => `
+              ${(window._pgApps = paginate('applications', filtered)).rows.map(a => `
                 <tr class="border-b border-slate-100 hover:bg-slate-50">
                   <td class="px-4 py-3 whitespace-nowrap">${fmtDate(a.submittedAt)}</td>
                   <td class="px-4 py-3 font-mono text-xs">${applicationRef(a)}</td>
@@ -7744,7 +7962,7 @@ function renderApplications() {
                 </tr>
               `).join('')}
             </tbody>
-          </table>
+          </table>${pagerHtml('applications', window._pgApps)}
         </div>`}
       </div>
     </div>
