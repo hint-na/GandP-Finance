@@ -4274,7 +4274,29 @@ function shareLoanAgreementWhatsApp(loanId) {
   downloadLoanAgreement(loanId);
 }
 
-function downloadReceipt(paymentId) {
+// Host the receipt PDF in the public 'receipts' bucket so the
+// WhatsApp/email message can carry a real link (wa.me messages
+// cannot attach files).
+async function uploadReceiptPdf(paymentId, doc) {
+  try {
+    const payment = state.payments.find(p => p.id === paymentId);
+    const blob = doc.output('blob');
+    const refStr = (payment.receiptNumber || paymentRef(payment)).replace(/[^A-Za-z0-9-]/g, '_');
+    const path = `${paymentId}/${refStr}.pdf`;
+    const { error } = await db.storage.from('receipts').upload(path, blob, { upsert: true, contentType: 'application/pdf' });
+    if (error) {
+      if (!localStorage.getItem('gpl_receipts_bucket_hint')) {
+        localStorage.setItem('gpl_receipts_bucket_hint', '1');
+        showAlert('Receipt links need a one-time setup. Run this in the Supabase SQL Editor:\n\ninsert into storage.buckets (id, name, public) values (\'receipts\', \'receipts\', true) on conflict (id) do nothing;\n\ncreate policy "Staff upload receipts" on storage.objects for insert to authenticated with check (bucket_id = \'receipts\' and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in (\'Administrator\', \'Loan Officer\', \'Cashier\')));\n\nUntil then, receipt messages are sent without the PDF link.', 'One-Time Setup Needed');
+      }
+      return null;
+    }
+    const { data } = db.storage.from('receipts').getPublicUrl(path);
+    return data.publicUrl;
+  } catch (e) { return null; }
+}
+
+async function downloadReceipt(paymentId) {
   const doc = generateReceipt(paymentId);
   if (!doc) return;
   const payment = state.payments.find(p => p.id === paymentId);
@@ -4282,17 +4304,18 @@ function downloadReceipt(paymentId) {
   const safeName = (client?.fullName || 'client').replace(/[^A-Za-z0-9]/g, '_');
   const filename = `Receipt_${safeName}_${paymentRef(payment)}.pdf`;
   const companyName = state.settings.companyName || 'GPL Finance';
+  const pdfUrl = (client?.phone || client?.email) ? await uploadReceiptPdf(paymentId, doc) : null;
   const opts = {
     subtitle: `${fmt(payment.amount)} received from ${client?.fullName || ''}`
   };
   if (client?.phone) {
-    opts.whatsapp = { phone: client.phone, message: buildReceiptMessage(payment, client, companyName), label: 'WhatsApp ' + client.fullName.split(' ')[0] };
+    opts.whatsapp = { phone: client.phone, message: buildReceiptMessage(payment, client, companyName, pdfUrl), label: 'WhatsApp ' + client.fullName.split(' ')[0] };
   }
   if (client?.email) {
     opts.email = {
       to: client.email,
       subject: `Payment Receipt from ${companyName}`,
-      body: buildReceiptMessage(payment, client, companyName),
+      body: buildReceiptMessage(payment, client, companyName, pdfUrl),
       label: 'Email ' + client.fullName.split(' ')[0]
     };
   }
@@ -4300,18 +4323,27 @@ function downloadReceipt(paymentId) {
   logAudit('generate_pdf', 'payment', paymentId, { document: 'receipt' });
 }
 
-function buildReceiptMessage(payment, client, companyName) {
+function buildReceiptMessage(payment, client, companyName, pdfUrl) {
   const loan = state.loans.find(l => l.id === payment.loanId);
   const remaining = loan ? loanOutstanding(loan.id) : 0;
   let msg = `Hello ${client.fullName.split(' ')[0]},\n\nThank you for your payment to ${companyName}.\n\nReceipt: ${payment.receiptNumber || paymentRef(payment)}\nAmount Received: ${fmt(payment.amount)}\nDate: ${fmtDate(payment.paymentDate)}\nLoan: ${loanRefById(payment.loanId)}\n`;
   if (remaining > 0.01) msg += `Outstanding Balance: ${fmt(remaining)}\n`;
   else msg += `\n*Your loan is fully settled. Congratulations!*\n`;
-  msg += `\nPlease find your official receipt PDF attached.\n\nThank you.`;
+  if (pdfUrl) msg += `\nView or download your official receipt PDF here:\n${pdfUrl}\n`;
+  msg += `\nThank you.`;
   return msg;
 }
 
-function shareReceiptWhatsApp(paymentId) {
-  downloadReceipt(paymentId);
+async function shareReceiptWhatsApp(paymentId) {
+  const payment = state.payments.find(p => p.id === paymentId);
+  const client = payment && state.clients.find(c => c.id === payment.clientId);
+  if (!client?.phone) { showAlert('Client has no phone number on file.'); return; }
+  const doc = generateReceipt(paymentId);
+  if (!doc) return;
+  const companyName = state.settings.companyName || 'GPL Finance';
+  const pdfUrl = await uploadReceiptPdf(paymentId, doc);
+  await logAudit('send', 'payment', paymentId, { channel: 'whatsapp', document: 'receipt', withLink: !!pdfUrl });
+  openWhatsApp(client.phone, buildReceiptMessage(payment, client, companyName, pdfUrl));
 }
 
 // =====================================================
