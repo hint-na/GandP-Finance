@@ -4285,6 +4285,7 @@ async function uploadReceiptPdf(paymentId, doc) {
     const path = `${paymentId}/${refStr}.pdf`;
     const { error } = await db.storage.from('receipts').upload(path, blob, { upsert: true, contentType: 'application/pdf' });
     if (error) {
+      showToast('Receipt link not added: ' + error.message, 'error');
       if (!localStorage.getItem('gpl_receipts_bucket_hint')) {
         localStorage.setItem('gpl_receipts_bucket_hint', '1');
         showAlert('Receipt links need a one-time setup. Run this in the Supabase SQL Editor:\n\ninsert into storage.buckets (id, name, public) values (\'receipts\', \'receipts\', true) on conflict (id) do nothing;\n\ncreate policy "Staff upload receipts" on storage.objects for insert to authenticated with check (bucket_id = \'receipts\' and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in (\'Administrator\', \'Loan Officer\', \'Cashier\')));\n\nUntil then, receipt messages are sent without the PDF link.', 'One-Time Setup Needed');
