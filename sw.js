@@ -1,5 +1,5 @@
-// GPL Finance Service Worker v18 (public landing page + staff login)
-const CACHE_NAME = 'gpl-finance-v18';
+// GPL Finance Service Worker v19 (landing page shown to signed-in users too)
+const CACHE_NAME = 'gpl-finance-v19';
 const APP_SHELL = [
   './manifest.json',
   'https://cdn.tailwindcss.com',

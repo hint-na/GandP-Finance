@@ -323,7 +323,7 @@
         <a class="lp-link" href="#lp-contact">Contact</a>
         <a class="lp-btn lp-btn-ghost lp-btn-sm" href="#login" onclick="event.preventDefault(); showStaffLogin()">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-          Staff Login
+          <span class="lp-staff-label">Staff Login</span>
         </a>
       </nav>
     </div>
@@ -432,7 +432,7 @@
       <div>&copy; <span id="lp-year"></span> GPL Finance. All rights reserved.</div>
       <div style="display:flex; gap:18px; flex-wrap:wrap">
         <a href="mailto:info@gpl-finance.com.na">info@gpl-finance.com.na</a>
-        <a href="#login" onclick="event.preventDefault(); showStaffLogin()">Staff Login</a>
+        <a href="#login" onclick="event.preventDefault(); showStaffLogin()"><span class="lp-staff-label">Staff Login</span></a>
       </div>
     </div>
   </footer>
@@ -1212,6 +1212,7 @@ function renderLanding() {
   const y = document.getElementById('lp-year');
   if (y) y.textContent = new Date().getFullYear();
   document.title = 'GPL Finance — Payday Loans | Fast. Simple. Trusted.';
+  document.querySelectorAll('.lp-staff-label').forEach(el => { el.textContent = state.currentUser ? 'Open Dashboard' : 'Staff Login'; });
   [0, 1200].forEach(ms => setTimeout(applyPublicBranding, ms));
 }
 
@@ -1228,8 +1229,8 @@ function showLanding() {
   window.scrollTo(0, 0);
 }
 
-window.addEventListener('popstate', () => { if (!state.currentUser && !document.getElementById('public-container')) renderApp(); });
-window.addEventListener('hashchange', () => { if (!state.currentUser && !document.getElementById('public-container')) renderApp(); });
+window.addEventListener('popstate', () => { if (!document.getElementById('public-container')) renderApp(); });
+window.addEventListener('hashchange', () => { if (!document.getElementById('public-container')) renderApp(); });
 
 // =====================================================
 // LOGIN VIEW
@@ -1553,6 +1554,9 @@ function renderApp() {
     applyCompanyLogo();
     return;
   }
+  // Signed in, but visiting the plain website address in a browser:
+  // show the company website (its button reads "Open Dashboard").
+  if (!wantsLoginScreen()) { renderLanding(); applyCompanyLogo(); return; }
   document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.remove('hidden');
