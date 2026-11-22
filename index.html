@@ -208,19 +208,252 @@
     aside { width: 200px !important; }
     .grid.grid-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
   }
+
+  /* ============================================
+     PUBLIC LANDING PAGE (company website)
+     ============================================ */
+  #landing-container { background: #fff; color: #0f172a; }
+  .lp-wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  .lp-nav { position: sticky; top: 0; z-index: 40; background: rgba(255,255,255,0.96); backdrop-filter: blur(6px); border-bottom: 1px solid #e2e8f0; }
+  .lp-nav-inner { display: flex; align-items: center; justify-content: space-between; height: 68px; gap: 12px; }
+  .lp-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .lp-brand-mark { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+  .lp-brand-name { font-weight: 900; font-size: 22px; letter-spacing: -0.02em; color: #1e3a8a; line-height: 1; }
+  .lp-brand-name small { display: block; font-size: 10px; letter-spacing: 0.32em; font-weight: 700; color: #1e3a8a; margin-top: 3px; }
+  .lp-links { display: flex; align-items: center; gap: 22px; font-size: 14px; font-weight: 600; }
+  .lp-links a.lp-link { color: #334155; text-decoration: none; }
+  .lp-links a.lp-link:hover { color: #1e40af; }
+  .lp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 22px; border-radius: 10px; font-weight: 700; font-size: 15px; text-decoration: none; cursor: pointer; border: 2px solid transparent; transition: background .15s, color .15s, border-color .15s; }
+  .lp-btn-orange { background: #f7941d; color: #fff; }
+  .lp-btn-orange:hover { background: #e07f08; }
+  .lp-btn-navy { background: #1e3a8a; color: #fff; }
+  .lp-btn-navy:hover { background: #172e6e; }
+  .lp-btn-ghost { background: transparent; color: #1e3a8a; border-color: #1e3a8a; }
+  .lp-btn-ghost:hover { background: #eff6ff; }
+  .lp-btn-white { background: #fff; color: #1e3a8a; }
+  .lp-btn-white:hover { background: #eff6ff; }
+  .lp-btn-sm { padding: 8px 16px; font-size: 14px; }
+  .lp-hero { background: linear-gradient(135deg, #ffffff 0%, #f1f5ff 55%, #e6ecfb 100%); position: relative; overflow: hidden; }
+  .lp-hero::after { content: ""; position: absolute; right: -120px; bottom: -160px; width: 520px; height: 520px; background: #1e3a8a; transform: rotate(35deg); opacity: .06; }
+  .lp-hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 40px; align-items: center; padding-top: 64px; padding-bottom: 72px; position: relative; z-index: 1; }
+  .lp-tagline { font-size: 13px; font-weight: 800; letter-spacing: .22em; color: #1e3a8a; text-transform: uppercase; }
+  .lp-h1 { font-weight: 900; line-height: .92; letter-spacing: -0.03em; margin: 14px 0 0; font-size: clamp(52px, 9vw, 104px); }
+  .lp-h1 .navy { color: #1e3a8a; display: block; }
+  .lp-h1 .orange { color: #f7941d; display: block; }
+  .lp-sub { font-size: 20px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; margin-top: 18px; letter-spacing: .01em; }
+  .lp-rule { width: 140px; height: 4px; background: #f7941d; border-radius: 4px; margin: 14px 0 22px; }
+  .lp-lead { font-size: 17px; color: #475569; max-width: 520px; line-height: 1.6; }
+  .lp-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .lp-hero-card { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .lp-rate { width: 250px; height: 250px; border-radius: 50%; background: #1e3a8a; border: 10px solid #f7941d; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 20px 50px rgba(30,58,138,.28); text-align: center; }
+  .lp-rate span { font-weight: 800; font-size: 20px; letter-spacing: .04em; line-height: 1.15; }
+  .lp-rate strong { font-weight: 900; font-size: 76px; color: #f7941d; line-height: 1; margin-top: 6px; }
+  .lp-approval { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 20px; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+  .lp-approval b { display: block; color: #1e3a8a; font-size: 18px; font-weight: 900; text-transform: uppercase; line-height: 1.1; }
+  .lp-approval em { font-style: normal; color: #f7941d; }
+  .lp-section { padding: 64px 0; }
+  .lp-section-alt { background: #f8fafc; }
+  .lp-eyebrow { text-align: center; }
+  .lp-pill { display: inline-block; background: #1e3a8a; color: #fff; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 8px 22px; border-radius: 8px; font-size: 15px; }
+  .lp-h2 { font-size: 30px; font-weight: 900; color: #1e3a8a; text-align: center; margin-top: 14px; letter-spacing: -0.01em; }
+  .lp-p-center { text-align: center; color: #64748b; max-width: 620px; margin: 10px auto 0; font-size: 16px; }
+  .lp-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 36px; }
+  .lp-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 28px 22px; text-align: center; }
+  .lp-card h3 { font-weight: 900; color: #1e3a8a; text-transform: uppercase; font-size: 17px; margin-top: 14px; }
+  .lp-card p { color: #475569; font-size: 15px; margin-top: 6px; }
+  .lp-icon { width: 68px; height: 68px; border-radius: 50%; background: #1e3a8a; color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+  .lp-icon svg { width: 32px; height: 32px; }
+  .lp-steps { counter-reset: s; }
+  .lp-step-num { width: 36px; height: 36px; border-radius: 50%; background: #f7941d; color: #fff; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; }
+  .lp-contact { background: #1e3a8a; color: #fff; }
+  .lp-contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: center; padding-top: 56px; padding-bottom: 56px; }
+  .lp-contact h2 { font-size: 36px; font-weight: 900; text-transform: uppercase; letter-spacing: -0.01em; }
+  .lp-contact p { color: #dbeafe; font-size: 17px; margin-top: 8px; }
+  .lp-contact-list a { display: flex; align-items: center; gap: 14px; color: #fff; text-decoration: none; padding: 10px 0; font-size: 18px; font-weight: 600; }
+  .lp-contact-list a.lp-phone { color: #a3e635; font-size: 24px; font-weight: 800; }
+  .lp-contact-list a:hover { text-decoration: underline; }
+  .lp-ci { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; background: #fff; }
+  .lp-trust { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .lp-trust-item { display: flex; align-items: center; gap: 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px; }
+  .lp-trust-item svg { width: 52px; height: 52px; flex-shrink: 0; color: #1e3a8a; }
+  .lp-trust-item small { display: block; font-size: 12px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; letter-spacing: .05em; }
+  .lp-trust-item b { display: block; font-size: 28px; font-weight: 900; color: #1e3a8a; line-height: 1.05; }
+  .lp-trust-item span { display: block; color: #475569; font-size: 13px; }
+  .lp-values { background: #172e6e; color: #fff; }
+  .lp-values-row { display: flex; flex-wrap: wrap; justify-content: space-around; gap: 14px; padding-top: 18px; padding-bottom: 18px; font-weight: 800; text-transform: uppercase; font-size: 14px; letter-spacing: .04em; }
+  .lp-values-row div { display: flex; align-items: center; gap: 8px; }
+  .lp-values-row svg { width: 22px; height: 22px; color: #f7941d; }
+  .lp-footer { background: #0f1d47; color: #94a3b8; font-size: 13px; }
+  .lp-footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-top: 20px; padding-bottom: 20px; }
+  .lp-footer a { color: #cbd5e1; text-decoration: none; }
+  .lp-footer a:hover { color: #fff; }
+  .lp-back { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #475569; text-decoration: none; margin-bottom: 14px; }
+  .lp-back:hover { color: #1e40af; }
+  @media (max-width: 860px) {
+    .lp-hero-grid { grid-template-columns: 1fr; padding-top: 40px; padding-bottom: 48px; gap: 28px; }
+    .lp-hero-card { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+    .lp-rate { width: 190px; height: 190px; border-width: 8px; }
+    .lp-rate strong { font-size: 58px; }
+    .lp-rate span { font-size: 16px; }
+    .lp-grid3 { grid-template-columns: 1fr; }
+    .lp-contact-grid { grid-template-columns: 1fr; padding-top: 44px; padding-bottom: 44px; }
+    .lp-trust { grid-template-columns: 1fr; }
+    .lp-links a.lp-link { display: none; }
+    .lp-section { padding: 48px 0; }
+  }
+  @media (max-width: 767px) {
+    #landing-container .lp-btn { min-height: 44px; }
+    .lp-brand-name { font-size: 19px; }
+  }
 </style>
 </head>
 <body>
 
+<!-- PUBLIC LANDING PAGE (company website) -->
+<div id="landing-container" class="hidden min-h-screen">
+  <header class="lp-nav">
+    <div class="lp-wrap lp-nav-inner">
+      <a href="#" class="lp-brand" onclick="event.preventDefault(); window.scrollTo({top:0, behavior:'smooth'})" aria-label="GPL Finance home">
+        <span class="lp-brand-mark public-logo-badge"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><rect x="9" y="22" width="6" height="14" rx="1.5" fill="#1e3a8a"/><rect x="18" y="15" width="6" height="21" rx="1.5" fill="#1e3a8a"/><rect x="27" y="8" width="6" height="28" rx="1.5" fill="#f7941d"/><path d="M4 34c6 9 30 9 40-6" stroke="#1e3a8a" stroke-width="4" fill="none" stroke-linecap="round"/></svg></span>
+        <span class="lp-brand-name">GPL<small>FINANCE</small></span>
+      </a>
+      <nav class="lp-links" aria-label="Main">
+        <a class="lp-link" href="#lp-how">How it works</a>
+        <a class="lp-link" href="#lp-req">Requirements</a>
+        <a class="lp-link" href="#lp-contact">Contact</a>
+        <a class="lp-btn lp-btn-ghost lp-btn-sm" href="#login" onclick="event.preventDefault(); showStaffLogin()">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+          Staff Login
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="landing-main" style="padding:0 !important; width:auto !important;">
+    <section class="lp-hero">
+      <div class="lp-wrap lp-hero-grid">
+        <div>
+          <div class="lp-tagline">Fast. Simple. Trusted.</div>
+          <h1 class="lp-h1"><span class="navy">Payday</span><span class="orange">Loans</span></h1>
+          <div class="lp-sub">Quick cash when you need it most!</div>
+          <div class="lp-rule"></div>
+          <p class="lp-lead">GPL Finance provides short-term payday loans to salaried Namibians. Apply online anytime, anywhere — attach your documents at your comfort and get a decision within minutes.</p>
+          <div class="lp-cta">
+            <a class="lp-btn lp-btn-orange" href="?apply=1">Apply Online Now
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <a class="lp-btn lp-btn-navy" href="https://wa.me/264836760320" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="24" height="24" fill="#fff"><path d="M12 2a10 10 0 00-8.6 15.1L2 22l5-1.3A10 10 0 1012 2zm0 18.2a8.2 8.2 0 01-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1112 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 01-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 00-.7.3 3 3 0 00-.9 2.2 5.2 5.2 0 001.1 2.7 11.8 11.8 0 004.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3z"/></svg> WhatsApp Us</a>
+          </div>
+        </div>
+        <div class="lp-hero-card">
+          <div class="lp-rate" role="img" aria-label="Interest rate 30%"><span>INTEREST<br>RATE</span><strong>30%</strong></div>
+          <div class="lp-approval">
+            <span class="lp-icon" style="width:52px;height:52px;background:#fff;color:#1e3a8a;border:2px solid #1e3a8a"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path stroke-linecap="round" d="M12 9v4l2.5 2M10 2h4M12 2v3"/></svg></span>
+            <b>Approval within<br><em>minutes!</em></b>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="lp-how" class="lp-section">
+      <div class="lp-wrap">
+        <div class="lp-eyebrow"><span class="lp-pill">Apply anytime, anywhere</span></div>
+        <h2 class="lp-h2">Three simple ways to apply</h2>
+        <p class="lp-p-center">Our application is available online. Attach your required documents via the link at your comfort, or send them to us on WhatsApp or email.</p>
+        <div class="lp-grid3">
+          <div class="lp-card">
+            <span class="lp-icon"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path stroke-linecap="round" d="M2 19h20M12 7v5M9.8 9.2L12 7l2.2 2.2"/></svg></span>
+            <h3>Apply online</h3>
+            <p>Fill in the online form and upload your documents from your phone or computer.</p>
+            <a class="lp-btn lp-btn-orange lp-btn-sm" style="margin-top:16px" href="?apply=1">Start application</a>
+          </div>
+          <div class="lp-card">
+            <span class="lp-icon" style="background:#25D366"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><path d="M12 2a10 10 0 00-8.6 15.1L2 22l5-1.3A10 10 0 1012 2zm0 18.2a8.2 8.2 0 01-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1112 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 01-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 00-.7.3 3 3 0 00-.9 2.2 5.2 5.2 0 001.1 2.7 11.8 11.8 0 004.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3z"/></svg></span>
+            <h3>WhatsApp</h3>
+            <p>Forward your required documents to us on WhatsApp.</p>
+            <p style="margin-top:12px"><a href="https://wa.me/264836760320" target="_blank" rel="noopener" style="color:#1e3a8a;font-weight:700">+264 83 676 0320</a><br><a href="https://wa.me/264818838566" target="_blank" rel="noopener" style="color:#1e3a8a;font-weight:700">+264 81 883 8566</a></p>
+          </div>
+          <div class="lp-card">
+            <span class="lp-icon"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+            <h3>Email</h3>
+            <p>Email your required documents to our applications desk.</p>
+            <p style="margin-top:12px"><a href="mailto:applications@gpl-finance.com.na" style="color:#1e3a8a;font-weight:700;word-break:break-all">applications@gpl-finance.com.na</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="lp-req" class="lp-section lp-section-alt">
+      <div class="lp-wrap">
+        <div class="lp-eyebrow"><span class="lp-pill">Requirements</span></div>
+        <h2 class="lp-h2">What you need to apply</h2>
+        <div class="lp-grid3">
+          <div class="lp-card"><span class="lp-icon"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z"/></svg></span><h3>3 month bank statements</h3><p>Your latest 3 months bank statements.</p></div>
+          <div class="lp-card"><span class="lp-icon"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path stroke-linecap="round" d="M5.8 16c.6-1.4 1.8-2.2 3.2-2.2s2.6.8 3.2 2.2M14.5 10h4M14.5 13.5h3"/></svg></span><h3>Namibian ID</h3><p>A valid Namibian ID document.</p></div>
+          <div class="lp-card"><span class="lp-icon"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h5M14 3l5 5h-5V3zM8 11h5M8 14h3"/><circle cx="17" cy="17" r="4"/><path stroke-linecap="round" d="M17 15.3v3.4M15.9 16.2h1.7a.6.6 0 010 1.2h-1.2a.6.6 0 000 1.2h1.7"/></svg></span><h3>Latest payslip</h3><p>Your most recent payslip.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="lp-contact" class="lp-contact">
+      <div class="lp-wrap lp-contact-grid">
+        <div>
+          <h2>Apply today</h2>
+          <p>Forward your required documents via WhatsApp or email — or apply online in a few minutes.</p>
+          <div class="lp-cta"><a class="lp-btn lp-btn-orange" href="?apply=1">Apply Online</a></div>
+        </div>
+        <div class="lp-contact-list">
+          <a class="lp-phone" href="https://wa.me/264836760320" target="_blank" rel="noopener"><span class="lp-ci"><svg viewBox="0 0 24 24" width="24" height="24" fill="#25D366"><path d="M12 2a10 10 0 00-8.6 15.1L2 22l5-1.3A10 10 0 1012 2zm0 18.2a8.2 8.2 0 01-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1112 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 01-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 00-.7.3 3 3 0 00-.9 2.2 5.2 5.2 0 001.1 2.7 11.8 11.8 0 004.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3z"/></svg></span>+264 83 676 0320</a>
+          <a class="lp-phone" href="https://wa.me/264818838566" target="_blank" rel="noopener"><span class="lp-ci"><svg viewBox="0 0 24 24" width="24" height="24" fill="#25D366"><path d="M12 2a10 10 0 00-8.6 15.1L2 22l5-1.3A10 10 0 1012 2zm0 18.2a8.2 8.2 0 01-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1112 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 01-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 00-.7.3 3 3 0 00-.9 2.2 5.2 5.2 0 001.1 2.7 11.8 11.8 0 004.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3z"/></svg></span>+264 81 883 8566</a>
+          <a href="mailto:info@gpl-finance.com.na"><span class="lp-ci"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#1e3a8a" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>info@gpl-finance.com.na</a>
+          <a href="mailto:applications@gpl-finance.com.na"><span class="lp-ci"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#1e3a8a" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>applications@gpl-finance.com.na</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-section">
+      <div class="lp-wrap lp-trust">
+        <div class="lp-trust-item"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linejoin="round" d="M12 3l8 3v6c0 4.6-3.4 8.4-8 9-4.6-.6-8-4.4-8-9V6l8-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8.5 12l2.5 2.5 4.5-5"/></svg><div><small>Registered with</small><b>BIPA</b><span>Business and Intellectual Property Authority</span></div></div>
+        <div class="lp-trust-item"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linejoin="round" d="M12 3l8 3v6c0 4.6-3.4 8.4-8 9-4.6-.6-8-4.4-8-9V6l8-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8.5 12l2.5 2.5 4.5-5"/></svg><div><small>Approved by</small><b>NAMFISA</b><span>Namibia Financial Institutions Supervisory Authority</span></div></div>
+      </div>
+    </section>
+
+    <div class="lp-values">
+      <div class="lp-wrap lp-values-row">
+        <div><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linejoin="round" d="M12 3l8 3v6c0 4.6-3.4 8.4-8 9-4.6-.6-8-4.4-8-9V6l8-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8.5 12l2.5 2.5 4.5-5"/></svg>Safe &amp; Secure</div>
+        <div><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path stroke-linecap="round" d="M12 9v4l2.5 2M10 2h4M12 2v3"/></svg>Fast Approval</div>
+        <div><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2 11l4-4 3 1 3-2 4 1 6 4-3 3M2 11l6 6c.8.8 2 .8 2.8 0l1-1M9 14l2 2M12 12l2.5 2.5M8 9l3.5-2"/></svg>Trusted Service</div>
+        <div><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><circle cx="5.5" cy="9.5" r="2.2"/><circle cx="18.5" cy="9.5" r="2.2"/><path stroke-linecap="round" d="M6.5 19c.4-3 2.7-5 5.5-5s5.1 2 5.5 5M1.5 18c.3-2 1.7-3.4 3.6-3.6M22.5 18c-.3-2-1.7-3.4-3.6-3.6"/></svg>Customer Focused</div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="lp-footer">
+    <div class="lp-wrap lp-footer-inner">
+      <div>&copy; <span id="lp-year"></span> GPL Finance. All rights reserved.</div>
+      <div style="display:flex; gap:18px; flex-wrap:wrap">
+        <a href="mailto:info@gpl-finance.com.na">info@gpl-finance.com.na</a>
+        <a href="#login" onclick="event.preventDefault(); showStaffLogin()">Staff Login</a>
+      </div>
+    </div>
+  </footer>
+</div>
+
 <!-- LOGIN SCREEN -->
 <div id="login-container" class="hidden min-h-screen flex items-center justify-center p-4">
-  <div class="card w-full max-w-md p-8">
+  <div class="w-full max-w-md">
+  <a href="./" class="lp-back" id="login-back-link" onclick="event.preventDefault(); showLanding()">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 18l-6-6 6-6"/></svg>
+    Back to website
+  </a>
+  <div class="card w-full p-8">
     <div class="text-center mb-6">
       <div id="app-logo-login" class="w-14 h-14 bg-blue-700 rounded-xl mx-auto flex items-center justify-center text-white font-bold text-xl mb-3">GPL</div>
       <h1 class="text-xl font-bold text-slate-900">GPL Finance</h1>
+      <div class="text-xs font-semibold uppercase tracking-wider text-blue-800 mt-1">Cashloan System &middot; Staff Portal</div>
       <p class="text-sm text-slate-500 mt-1" id="login-subtitle">Sign in to continue</p>
     </div>
     <div id="login-form-container"></div>
+  </div>
   </div>
 </div>
 
@@ -957,18 +1190,64 @@ function showAlert(message, title = 'Notice') {
 }
 
 // =====================================================
+// PUBLIC LANDING PAGE + STAFF LOGIN ROUTING
+// Visitors to the site see the company landing page; staff reach the
+// login via "Staff Login" (or the #login address). The installed app
+// on staff phones skips the landing page and opens the login directly.
+// =====================================================
+function isInstalledApp() {
+  try {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  } catch (e) { return false; }
+}
+
+function wantsLoginScreen() {
+  return window.location.hash === '#login' || isInstalledApp();
+}
+
+function renderLanding() {
+  document.getElementById('login-container').classList.add('hidden');
+  document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('landing-container').classList.remove('hidden');
+  const y = document.getElementById('lp-year');
+  if (y) y.textContent = new Date().getFullYear();
+  document.title = 'GPL Finance — Payday Loans | Fast. Simple. Trusted.';
+  [0, 1200].forEach(ms => setTimeout(applyPublicBranding, ms));
+}
+
+function showStaffLogin() {
+  if (window.location.hash !== '#login') history.pushState(null, '', '#login');
+  renderApp();
+  window.scrollTo(0, 0);
+  setTimeout(() => { const e = document.getElementById('li-email'); if (e) e.focus(); }, 50);
+}
+
+function showLanding() {
+  if (window.location.hash) history.pushState(null, '', window.location.pathname + window.location.search);
+  renderApp();
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener('popstate', () => { if (!state.currentUser && !document.getElementById('public-container')) renderApp(); });
+window.addEventListener('hashchange', () => { if (!state.currentUser && !document.getElementById('public-container')) renderApp(); });
+
+// =====================================================
 // LOGIN VIEW
 // =====================================================
 function renderLogin() {
+  document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('login-container').classList.remove('hidden');
+  const back = document.getElementById('login-back-link');
+  if (back) back.style.display = isInstalledApp() ? 'none' : '';
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('login-subtitle').textContent = 'Sign in to continue';
   document.getElementById('login-form-container').innerHTML = `
     <div class="space-y-4">
-      <div><label>Email</label><input type="email" id="li-email" autocomplete="username" autofocus value="gpfinance.na@gmail.com"></div>
+      <div><label>Email</label><input type="email" id="li-email" autocomplete="username" autofocus placeholder="you@example.com"></div>
       <div><label>Password</label><input type="password" id="li-password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()"></div>
       <button onclick="doLogin()" class="btn-primary w-full" id="li-btn">Sign In</button>
-      <div class="text-xs text-slate-500 text-center mt-4">Users are managed by the administrator via the Supabase dashboard.</div>
+      <div class="text-xs text-slate-500 text-center mt-4">For GPL Finance staff only. Accounts are created by the administrator.</div>
+      <div class="text-xs text-slate-500 text-center">Looking for a loan? <a href="?apply=1" class="text-blue-800 font-semibold">Apply online here</a>.</div>
     </div>
   `;
 }
@@ -1269,7 +1548,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 function renderApp() {
-  if (!state.currentUser) { renderLogin(); applyCompanyLogo(); return; }
+  if (!state.currentUser) {
+    if (wantsLoginScreen()) renderLogin(); else renderLanding();
+    applyCompanyLogo();
+    return;
+  }
+  document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.remove('hidden');
   applyCompanyLogo();
@@ -6135,6 +6419,7 @@ async function applyPublicBranding() {
 async function renderUploadPage(token) {
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('landing-container').classList.add('hidden');
   const container = document.createElement('div');
   container.id = 'public-container';
   container.className = 'min-h-screen bg-slate-50 py-6 px-4';
@@ -6344,6 +6629,7 @@ async function submitPublicUploads(token, clientId) {
 async function renderSignaturePage(token) {
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('landing-container').classList.add('hidden');
   const container = document.createElement('div');
   container.id = 'public-container';
   container.className = 'min-h-screen bg-slate-50 py-6 px-4';
@@ -6800,6 +7086,7 @@ function viewSignatureDetails(loanId) {
 async function renderAgreementViewPage(token) {
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('landing-container').classList.add('hidden');
   const container = document.createElement('div');
   container.id = 'public-container';
   container.className = 'min-h-screen bg-slate-50 py-6 px-4';
@@ -8061,6 +8348,7 @@ function applicationRiskBanner(app) {
 function renderApplyPage() {
   document.getElementById('login-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('landing-container').classList.add('hidden');
   const container = document.createElement('div');
   container.id = 'public-container';
   container.className = 'min-h-screen bg-slate-50 py-6 px-4';

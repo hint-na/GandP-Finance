@@ -1,8 +1,9 @@
 {
+  "id": "./",
   "name": "GPL Finance",
   "short_name": "GPL Finance",
   "description": "Cash loan management system for GPL Finance",
-  "start_url": "./",
+  "start_url": "./#login",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
